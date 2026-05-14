@@ -1,0 +1,45 @@
+# Campus Auth Guardian 配置文件
+# 注意：此文件必须使用 UTF-8 编码保存！
+
+[network]
+# --- 网络配置 ---
+# 校园网认证服务器地址（登录门户的 API 地址）
+# 大多数学校使用类似格式，如有变动请咨询校园网管理部门
+auth_url = http://10.10.102.50/eportal/portal/login
+
+# 网络连通性检测地址（用于判断是否需要重新认证）
+# 建议使用国内可直连的网站，如百度、淘宝等
+check_url = http://www.baidu.com
+
+# 网络检测间隔（秒）
+# 守护模式下，每隔此时间检测一次网络连通性
+# 数值越小检测越频繁，但可能增加网络请求
+check_interval = 30
+
+[account]
+# --- 账号配置 ---
+# 账号格式：,0,学号@运营商
+# 运营商对应关系：
+#   unicom  - 联通用户
+#   telecom - 电信用户
+#   cmcc    - 移动用户
+user_account = ,0,YOUR_STUDENT_ID@unicom
+
+# 账号密码
+user_password = YOUR_PASSWORD
+
+[guardian]
+# --- 守护模式配置 ---
+# 是否默认启用守护模式
+# 0 - 关闭（默认），程序启动后需手动开启
+# 1 - 开启，程序启动时自动进入守护模式
+enabled = 0
+
+# 认证失败后重试间隔（秒）
+# 每次认证失败后等待的时间再进行下一次尝试
+retry_interval = 10
+
+# 最大重试次数
+# 网络断开后，守护模式尝试认证的最大次数
+# 达到此次数仍失败会停止重试并显示通知
+max_retries = 3

@@ -1,0 +1,31 @@
+# Build outputs
+*.exe
+*.dll
+*.o
+*.obj
+
+# IDE
+.vscode/
+.idea/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+
+# CMake
+build/
+cmake-build-*/
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.cmake
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Config with credentials (will be created from template)
+# config.ini  # Uncomment if you want to ignore config.ini
