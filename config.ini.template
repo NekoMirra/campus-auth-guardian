@@ -28,6 +28,12 @@ user_account = ,0,YOUR_STUDENT_ID@unicom
 # 账号密码
 user_password = YOUR_PASSWORD
 
+# 固定IP地址（可选）
+# 如果设置，程序将使用此IP进行认证，不再自动检测
+# 如果不设置或留空，程序将自动检测本机IP
+# 例如：fixed_ip = 10.59.29.29
+fixed_ip =
+
 [guardian]
 # --- 守护模式配置 ---
 # 是否默认启用守护模式

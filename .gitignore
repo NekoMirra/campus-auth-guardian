@@ -23,9 +23,10 @@ Makefile
 # Logs
 *.log
 
+# Config with credentials
+config.ini
+config.ini.local
+
 # OS
 .DS_Store
 Thumbs.db
-
-# Config with credentials (will be created from template)
-# config.ini  # Uncomment if you want to ignore config.ini

@@ -71,6 +71,8 @@ check_interval = 30
 # 运营商可选：unicom(联通), telecom(电信), cmcc(移动)
 user_account = ,0,YOUR_STUDENT_ID@unicom
 user_password = YOUR_PASSWORD
+# 固定IP地址（可选，设置后优先使用此IP，不自动检测）
+# fixed_ip = 10.59.29.29
 
 [guardian]
 # 是否默认启用守护模式 (0=关闭, 1=开启)
@@ -102,6 +104,8 @@ max_retries = 3
 | Manual Auth | 立即执行一次认证 |
 | Open Login Page | 在浏览器打开登录页面 |
 | Guardian Mode | 开关守护模式（自动重连） |
+| Logout | 注销当前连接 |
+| Open Config | 打开配置文件 |
 | Start with Windows | 开关开机自启 |
 | Exit | 退出程序 |
 
