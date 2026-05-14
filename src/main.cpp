@@ -27,6 +27,7 @@ struct Config {
     std::wstring user_account;
     std::wstring user_password;
     std::wstring user_ip;
+    std::wstring fixed_ip;  // 固定IP，如果设置则优先使用
     bool guardian_enabled;
     int retry_interval;
     int max_retries;
@@ -54,6 +55,7 @@ struct Config {
         check_interval = get_int("network", "check_interval", 30);
         get_val("account", "user_account", user_account);
         get_val("account", "user_password", user_password);
+        get_val("account", "fixed_ip", fixed_ip);  // 读取固定IP配置
         guardian_enabled = get_int("guardian", "enabled", 0) == 1;
         retry_interval = get_int("guardian", "retry_interval", 10);
         max_retries = get_int("guardian", "max_retries", 3);
@@ -259,10 +261,11 @@ std::string build_auth_url(const std::string& mac, const std::string& phpsessid)
     std::string encoded_account = url_encode(account);
     std::string encoded_password = url_encode(password);
 
-    std::string mac_param = mac.empty() ? "000000000000" : mac;
+    // Use 000000000000 as seen in successful packet capture
+    std::string mac_param = "000000000000";
 
-    // Use dr1010 as seen in successful packet capture
-    std::string url = wstring_to_utf8(g_config.auth_url) + "?callback=dr1010"
+    // Use dr1005 and v=3015 from successful packet capture
+    std::string url = wstring_to_utf8(g_config.auth_url) + "?callback=dr1005"
         "&login_method=1"
         "&user_account=" + encoded_account +
         "&user_password=" + encoded_password +
@@ -274,7 +277,7 @@ std::string build_auth_url(const std::string& mac, const std::string& phpsessid)
         "&jsVersion=4.1.3"
         "&terminal_type=1"
         "&lang=zh-cn"
-        "&v=2517"
+        "&v=3015"
         "&lang=zh";
 
     write_log("Auth URL: %s", url.c_str());
@@ -349,48 +352,143 @@ bool check_internet_access() {
 // Authentication
 // ============================================================================
 std::string get_local_ip() {
-    std::string ip;
+    write_log("=== Network Adapters ===");
 
     PIP_ADAPTER_INFO pAdapterInfo = NULL;
     ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
 
-    // Track best IP - prefer 10.x.x.x over 172.x.x.x
-    std::string best_ip;
+    // Track best IP - prefer 10.x.x.x > WiFi 192.168.x.x > Ethernet 192.168.x.x > 172.x.x.x
+    // For campus networks: 10.x.x.x is most common, but some use 192.168.x.x for WiFi
+    std::string ip_best_10;
+    std::string ip_wifi_192;
+    std::string ip_eth_192;
+    std::string ip_172;
+    std::string best_adapter_name;
+
+    // Helper to check if adapter is virtual by MAC prefix or Description
+    auto is_virtual_adapter = [](PIP_ADAPTER_INFO pAdapter) -> bool {
+        // Check MAC prefix for common hypervisors
+        if (pAdapter->AddressLength >= 3) {
+            // Hyper-V: 00-15-5D-xx-xx-xx
+            if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x15 &&
+                pAdapter->Address[2] == 0x5D) {
+                return true;
+            }
+            // VMware: 00-50-56-xx-xx-xx
+            if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x50 &&
+                pAdapter->Address[2] == 0x56) {
+                return true;
+            }
+            // VirtualBox: 08-00-27-xx-xx-xx
+            if (pAdapter->Address[0] == 0x08 && pAdapter->Address[1] == 0x00 &&
+                pAdapter->Address[2] == 0x27) {
+                return true;
+            }
+        }
+
+        // Check Description for virtual keywords
+        const char* d = pAdapter->Description;
+        if (d) {
+            if (strstr(d, "Hyper-V") != NULL || strstr(d, "hyper-v") != NULL ||
+                strstr(d, "vEthernet") != NULL || strstr(d, "Virtual") != NULL ||
+                strstr(d, "VMware") != NULL || strstr(d, "VirtualBox") != NULL ||
+                strstr(d, "VPN") != NULL || strstr(d, "TAP") != NULL ||
+                strstr(d, "TUN") != NULL || strstr(d, "WireGuard") != NULL ||
+                strstr(d, "OpenVPN") != NULL || strstr(d, "Docker") != NULL) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // Helper to check if IP is from Hyper-V default switch
+    auto is_hyperv_ip = [](const char* ip) -> bool {
+        // Hyper-V default switch uses 172.17.x.x - 172.31.x.x range
+        // But specifically 172.17.240.0/24 is common
+        if (strncmp(ip, "172.", 4) == 0) {
+            // Could be Hyper-V, but we can't be 100% sure
+            // Only skip if it looks like a virtual network IP
+            return true; // Be conservative - skip all 172.x.x.x if not sure
+        }
+        return false;
+    };
 
     if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
         pAdapterInfo = (IP_ADAPTER_INFO*)malloc(ulOutBufLen);
         if (pAdapterInfo) {
             if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == NO_ERROR) {
                 for (PIP_ADAPTER_INFO pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next) {
-                    if (pAdapter->Type == MIB_IF_TYPE_ETHERNET || pAdapter->Type == IF_TYPE_IEEE80211) {
-                        IP_ADDR_STRING* pIpAddr = &pAdapter->IpAddressList;
-                        while (pIpAddr) {
-                            std::string addr = pIpAddr->IpAddress.String;
-                            if (addr.find("10.") == 0) {
-                                // 10.x.x.x is highest priority for campus network
-                                ip = addr;
-                                break;
+                    const char* type_str = "Unknown";
+                    if (pAdapter->Type == MIB_IF_TYPE_ETHERNET) type_str = "Ethernet";
+                    else if (pAdapter->Type == IF_TYPE_IEEE80211) type_str = "WiFi";
+
+                    bool is_virtual = is_virtual_adapter(pAdapter);
+
+                    IP_ADDR_STRING* pIpAddr = &pAdapter->IpAddressList;
+                    while (pIpAddr) {
+                        std::string addr = pIpAddr->IpAddress.String;
+
+                        // Log MAC prefix for debugging
+                        if (pAdapter->AddressLength >= 3) {
+                            write_log("  [%s] %s: %s (MAC: %02X-%02X-%02X-...)",
+                                type_str, pAdapter->Description, addr.c_str(),
+                                pAdapter->Address[0], pAdapter->Address[1], pAdapter->Address[2]);
+                        } else {
+                            if (is_virtual) {
+                                write_log("  [SKIP-VIRTUAL:%s] %s: %s",
+                                    type_str, pAdapter->Description, addr.c_str());
+                            } else {
+                                write_log("  [%s] %s: %s",
+                                    type_str, pAdapter->Description, addr.c_str());
                             }
-                            if (addr.find("192.168.") == 0 && ip.empty() && best_ip.empty()) {
-                                best_ip = addr;
-                            }
-                            if (addr.find("172.") == 0 && ip.empty() && best_ip.empty()) {
-                                best_ip = addr;
-                            }
-                            pIpAddr = pIpAddr->Next;
                         }
+
+                        // Only consider non-virtual, non-zero IPs
+                        if (!is_virtual && addr != "0.0.0.0") {
+                            bool is_wifi = (pAdapter->Type == IF_TYPE_IEEE80211);
+
+                            if (addr.find("10.") == 0) {
+                                ip_best_10 = addr;
+                                best_adapter_name = pAdapter->Description;
+                            } else if (addr.find("192.168.") == 0) {
+                                if (is_wifi && ip_wifi_192.empty()) {
+                                    ip_wifi_192 = addr;
+                                } else if (!is_wifi && ip_eth_192.empty()) {
+                                    ip_eth_192 = addr;
+                                }
+                            } else if (addr.find("172.") == 0 && ip_172.empty()) {
+                                // Skip 172.x.x.x - likely virtual network
+                                write_log("    [SKIP-172: likely virtual network]");
+                            }
+                        } else if (is_virtual) {
+                            write_log("    [SKIP: virtual adapter]");
+                        }
+                        pIpAddr = pIpAddr->Next;
                     }
-                    if (!ip.empty()) break;
                 }
             }
             free(pAdapterInfo);
         }
     }
+    write_log("=== IP Selection ===");
+    write_log("  10.x.x.x found: %s", ip_best_10.empty() ? "(none)" : ip_best_10.c_str());
+    write_log("  WiFi 192.168.x.x: %s", ip_wifi_192.empty() ? "(none)" : ip_wifi_192.c_str());
+    write_log("  Eth 192.168.x.x: %s", ip_eth_192.empty() ? "(none)" : ip_eth_192.c_str());
+    write_log("  172.x.x.x found: %s (skipped)", ip_172.empty() ? "(none)" : ip_172.c_str());
+    write_log("  Best adapter: %s", best_adapter_name.empty() ? "(none)" : best_adapter_name.c_str());
 
-    // Use best_ip if no perfect match found
-    if (ip.empty() && !best_ip.empty()) {
-        ip = best_ip;
+    // Priority: 10.x.x.x > WiFi 192.168.x.x > Ethernet 192.168.x.x > 172.x.x.x
+    std::string ip;
+    if (!ip_best_10.empty()) {
+        ip = ip_best_10;
+    } else if (!ip_wifi_192.empty()) {
+        ip = ip_wifi_192;
+    } else if (!ip_eth_192.empty()) {
+        ip = ip_eth_192;
+    } else if (!ip_172.empty()) {
+        ip = ip_172; // Fallback - should rarely happen
     }
+    write_log("  Selected: %s", ip.empty() ? "(none)" : ip.c_str());
 
     if (ip.empty()) {
         char hostname[256];
@@ -417,17 +515,42 @@ std::string get_local_mac() {
     PIP_ADAPTER_INFO pAdapterInfo = NULL;
     ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
 
+    // Helper to check if adapter is virtual by MAC prefix
+    auto is_virtual_mac = [](PIP_ADAPTER_INFO pAdapter) -> bool {
+        if (pAdapter->AddressLength >= 3) {
+            // Hyper-V: 00-15-5D-xx-xx-xx
+            if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x15 &&
+                pAdapter->Address[2] == 0x5D) {
+                return true;
+            }
+            // VMware: 00-50-56-xx-xx-xx
+            if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x50 &&
+                pAdapter->Address[2] == 0x56) {
+                return true;
+            }
+            // VirtualBox: 08-00-27-xx-xx-xx
+            if (pAdapter->Address[0] == 0x08 && pAdapter->Address[1] == 0x00 &&
+                pAdapter->Address[2] == 0x27) {
+                return true;
+            }
+        }
+        return false;
+    };
+
     if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
         pAdapterInfo = (IP_ADAPTER_INFO*)malloc(ulOutBufLen);
         if (pAdapterInfo) {
             if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == NO_ERROR) {
                 for (PIP_ADAPTER_INFO pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next) {
+                    // Skip virtual adapters by MAC prefix
+                    if (is_virtual_mac(pAdapter)) continue;
+
                     if (pAdapter->Type == MIB_IF_TYPE_ETHERNET || pAdapter->Type == IF_TYPE_IEEE80211) {
                         IP_ADDR_STRING* pIpAddr = &pAdapter->IpAddressList;
                         while (pIpAddr) {
                             std::string addr = pIpAddr->IpAddress.String;
-                            if (addr.find("10.") == 0 || addr.find("192.168.") == 0 ||
-                                (addr.find("172.") == 0)) {
+                            // Only get MAC for non-virtual, non-zero IPs
+                            if (addr != "0.0.0.0") {
                                 char mac_str[32];
                                 snprintf(mac_str, sizeof(mac_str),
                                     "%02X-%02X-%02X-%02X-%02X-%02X",
@@ -452,7 +575,16 @@ std::string get_local_mac() {
 }
 
 bool authenticate(std::string* msg = nullptr) {
-    std::string ip = get_local_ip();
+    std::string ip;
+
+    // 如果配置了固定IP，优先使用
+    if (!g_config.fixed_ip.empty()) {
+        ip = wstring_to_utf8(g_config.fixed_ip);
+        write_log("Using fixed IP from config: %s", ip.c_str());
+    } else {
+        ip = get_local_ip();
+    }
+
     std::string mac = get_local_mac();
 
     if (ip.empty()) {
@@ -518,6 +650,8 @@ bool authenticate(std::string* msg = nullptr) {
 #define ID_TRAY_GUARDIAN 1003
 #define ID_TRAY_OPEN_WEB 1004
 #define ID_TRAY_AUTOSTART 1005
+#define ID_TRAY_LOGOUT 1006
+#define ID_TRAY_OPEN_CONFIG 1007
 
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_guardian_active{false};
@@ -878,6 +1012,85 @@ void open_login_web() {
         NULL, NULL, SW_SHOWNORMAL);
 }
 
+void open_config_file() {
+    char exe_path[MAX_PATH];
+    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
+    std::string dir = exe_path;
+    size_t pos = dir.rfind('\\');
+    if (pos != std::string::npos) dir = dir.substr(0, pos);
+    std::string config_path = dir + "\\config.ini";
+    ShellExecuteA(NULL, "open", config_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
+}
+
+bool logout() {
+    write_log("Logout started");
+
+    std::string ip;
+    if (!g_config.fixed_ip.empty()) {
+        ip = wstring_to_utf8(g_config.fixed_ip);
+    } else {
+        ip = get_local_ip();
+    }
+
+    if (ip.empty()) {
+        write_log("Logout failed: cannot get local IP");
+        return false;
+    }
+
+    write_log("Logout IP: %s", ip.c_str());
+
+    // Build logout URL
+    std::string url = wstring_to_utf8(g_config.auth_url);
+    size_t login_pos = url.find("/login");
+    if (login_pos != std::string::npos) {
+        url.replace(login_pos, 6, "/logout");
+    }
+
+    url += "?callback=dr1003&login_method=1&user_account=drcom&user_password=123"
+           "&ac_logout=1&register_mode=1"
+           "&wlan_user_ip=" + ip +
+           "&wlan_user_ipv6=&wlan_vlan_id=1"
+           "&wlan_user_mac=000000000000"
+           "&wlan_ac_ip=&wlan_ac_name="
+           "&jsVersion=4.1.3&v=10093&lang=zh";
+
+    write_log("Logout URL: %s", url.c_str());
+
+    HINTERNET hInternet = InternetOpenA("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
+    if (!hInternet) {
+        write_log("InternetOpen failed in logout");
+        return false;
+    }
+
+    HINTERNET hUrl = InternetOpenUrlA(hInternet, url.c_str(), NULL, 0,
+        INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD, 0);
+
+    std::string response;
+    if (hUrl) {
+        char buf[4096];
+        DWORD bytesRead;
+        while (InternetReadFile(hUrl, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
+            buf[bytesRead] = '\0';
+            response += buf;
+        }
+        InternetCloseHandle(hUrl);
+    }
+    InternetCloseHandle(hInternet);
+
+    write_log("Logout response: %s", response.c_str());
+
+    // Check for success
+    if (response.find("\"result\":1") != std::string::npos ||
+        response.find("\"result\": 1") != std::string::npos) {
+        write_log("Logout success");
+        return true;
+    }
+
+    write_log("Logout may have failed");
+    return false;
+}
+
 void manual_auth() {
     if (g_auth_in_progress) return;
     g_auth_in_progress = true;
@@ -916,7 +1129,8 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_OPEN_WEB, L"Open Login Page");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING | (g_guardian_enabled ? MF_CHECKED : 0), ID_TRAY_GUARDIAN, L"Guardian Mode");
-            AppendMenuW(hMenu, MF_STRING | (g_autostart_enabled ? MF_CHECKED : 0), ID_TRAY_AUTOSTART, L"Start with Windows");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_LOGOUT, L"Logout");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_OPEN_CONFIG, L"Open Config");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
 
@@ -942,6 +1156,23 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         case ID_TRAY_OPEN_WEB:
             open_login_web();
+            break;
+        case ID_TRAY_LOGOUT:
+            {
+                std::thread t([]() {
+                    if (logout()) {
+                        update_tray_tooltip(L"Logged out");
+                        show_notification(L"Campus Guardian", L"Logout successful!");
+                    } else {
+                        update_tray_tooltip(L"Logout failed");
+                        show_notification(L"Campus Guardian", L"Logout may have failed. Check log for details.");
+                    }
+                });
+                t.detach();
+            }
+            break;
+        case ID_TRAY_OPEN_CONFIG:
+            open_config_file();
             break;
         case ID_TRAY_EXIT:
             g_running = false;
