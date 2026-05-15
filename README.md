@@ -37,6 +37,17 @@ cmake ..
 cmake --build . --config Release
 ```
 
+### MSVC ARM64
+
+```bash
+mkdir build-arm64 && cd build-arm64
+cmake .. -G "Visual Studio 17 2022" -A ARM64
+cmake --build . --config Release --target CampusAuthGuardian
+cmake --install . --config Release --prefix dist/ARM64
+```
+
+ARM64 版本的可执行文件会输出到 `dist/ARM64/bin/`。
+
 ### 手动编译 (MinGW)
 
 ```bash
@@ -86,7 +97,7 @@ max_retries = 3
 ### 运营商账号格式
 
 | 运营商 | 格式 | 示例 |
-|--------|------|------|
+| -------- | ------ | ------ |
 | 联通 | `,0,学号@unicom` | `,0,24028116@unicom` |
 | 电信 | `,0,学号@telecom` | `,0,24028116@telecom` |
 | 移动 | `,0,学号@cmcc` | `,0,24028116@cmcc` |
@@ -100,7 +111,7 @@ max_retries = 3
 ### 托盘菜单
 
 | 选项 | 说明 |
-|------|------|
+| ------ | ------ |
 | Manual Auth | 立即执行一次认证 |
 | Open Login Page | 在浏览器打开登录页面 |
 | Guardian Mode | 开关守护模式（自动重连） |
@@ -113,9 +124,18 @@ max_retries = 3
 
 日志文件位于程序同目录下的 `campus_auth.log`，包含每次认证请求的详细信息。
 
+## Release
+
+仓库已加入 GitHub Actions release 流程。推送 `v*` 标签后会自动构建并发布两个 Windows 资产：
+
+- `CampusAuthGuardian-windows-x64.zip`
+- `CampusAuthGuardian-windows-ARM64.zip`
+
+每个压缩包都包含程序可执行文件、`config.ini.template` 和 `README.md`。
+
 ## 项目结构
 
-```
+```text
 campus-auth-guardian/
 ├── src/
 │   └── main.cpp          # 主程序源码
