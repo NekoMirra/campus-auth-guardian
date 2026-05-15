@@ -4,8 +4,8 @@
 [network]
 # --- 网络配置 ---
 # 校园网认证服务器地址（登录门户的 API 地址）
-# 大多数学校使用类似格式，如有变动请咨询校园网管理部门
-auth_url = http://10.10.102.50/eportal/portal/login
+# 大多数学校使用类似格式，可自行抓包登录请求查看地址
+auth_url = http://10.10.102.50:801/eportal/portal/login
 
 # 网络连通性检测地址（用于判断是否需要重新认证）
 # 建议使用国内可直连的网站，如百度、淘宝等
@@ -23,6 +23,7 @@ check_interval = 30
 #   unicom  - 联通用户
 #   telecom - 电信用户
 #   cmcc    - 移动用户
+#如校园网可不传
 user_account = ,0,YOUR_STUDENT_ID@unicom
 
 # 账号密码
