@@ -3,6 +3,7 @@ project(CampusAuthGuardian)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
+include(GNUInstallDirs)
 
 # Windows-specific
 add_definitions(-D_WIN32_WINNT=0x0501)
@@ -25,5 +26,12 @@ else()
     target_link_libraries(CampusAuthGuardian -lwininet -lws2_32 -lcomctl32 -lshell32 -liphlpapi)
 endif()
 
-# Create output directory
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+install(TARGETS CampusAuthGuardian
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+install(FILES
+    config.ini.template
+    README.md
+    DESTINATION .
+)
