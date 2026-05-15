@@ -70,8 +70,8 @@ g++ -std=c++17 -o CampusAuthGuardian.exe src/main.cpp \
 
 ```ini
 [network]
-# 认证服务器地址（校园网门户URL）
-auth_url = http://10.10.102.50/eportal/portal/login
+# 认证服务器地址（校园网门户登录请求API）
+auth_url = http://10.10.102.50:801/eportal/portal/login
 # 网络连通性检测地址（需使用能直连的外网）
 check_url = http://www.baidu.com
 # 网络检测间隔（秒），守护模式下每隔此时间检测一次

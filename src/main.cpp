@@ -93,7 +93,7 @@ bool ensure_config_exists() {
         } else {
             // Fallback: generate a usable config when template is missing.
             dst << "[network]\n"
-                   "auth_url = http://10.10.102.50/eportal/portal/login\n"
+                   "auth_url = http://10.10.102.50:801/eportal/portal/login\n"
                    "check_url = http://www.baidu.com\n"
                    "check_interval = 30\n"
                    "\n"
