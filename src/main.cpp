@@ -10,6 +10,7 @@
 #include <chrono>
 #include <fstream>
 #include <ShlObj.h>
+#include <shellapi.h>
 #include <vector>
 
 // ============================================================================
@@ -1254,15 +1255,9 @@ int main_loop() {
 }
 
 // ============================================================================
-// Console Mode Entry
+// Application Entry
 // ============================================================================
-int main(int argc, char* argv[]) {
-    bool console_mode = false;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--console") == 0) {
-            console_mode = true;
-        }
-    }
+static int app_main(bool console_mode) {
 
     char exe_path[MAX_PATH];
     GetModuleFileNameA(NULL, exe_path, MAX_PATH);
@@ -1307,4 +1302,33 @@ int main(int argc, char* argv[]) {
     }
 
     return main_loop();
+}
+
+int main(int argc, char* argv[]) {
+    bool console_mode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--console") == 0) {
+            console_mode = true;
+        }
+    }
+
+    return app_main(console_mode);
+}
+
+int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+    int argc = 0;
+    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    bool console_mode = false;
+
+    if (argv != NULL) {
+        for (int i = 1; i < argc; i++) {
+            if (wcscmp(argv[i], L"--console") == 0) {
+                console_mode = true;
+                break;
+            }
+        }
+        LocalFree(argv);
+    }
+
+    return app_main(console_mode);
 }
