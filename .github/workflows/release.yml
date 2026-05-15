@@ -12,7 +12,7 @@ permissions:
   contents: write
 
 jobs:
-  build:
+  build_windows:
     runs-on: windows-2022
     strategy:
       fail-fast: false
@@ -33,20 +33,20 @@ jobs:
       - name: Install
         run: cmake --install build-${{ matrix.architecture }} --config Release --prefix dist/${{ matrix.architecture }}
 
-      - name: Package
+      - name: Prepare executable asset
         shell: powershell
         run: |
           New-Item -ItemType Directory -Force -Path release | Out-Null
-          Compress-Archive -Path dist/${{ matrix.architecture }}/* -DestinationPath release/CampusAuthGuardian-windows-${{ matrix.architecture }}.zip -Force
+          Copy-Item -Path dist/${{ matrix.architecture }}/bin/CampusAuthGuardian.exe -Destination release/CampusAuthGuardian-windows-${{ matrix.architecture }}.exe -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: CampusAuthGuardian-windows-${{ matrix.architecture }}
-          path: release/CampusAuthGuardian-windows-${{ matrix.architecture }}.zip
+          path: release/CampusAuthGuardian-windows-${{ matrix.architecture }}.exe
 
   release:
-    needs: build
+    needs: build_windows
     if: startsWith(github.ref, 'refs/tags/v') || github.ref == 'refs/heads/master'
     runs-on: ubuntu-latest
     steps:
@@ -61,5 +61,5 @@ jobs:
         with:
           tag_name: ${{ startsWith(github.ref, 'refs/tags/v') && github.ref_name || 'v1.0.0' }}
           allow_updates: true
-          files: release/*.zip
+          files: release/*
           generate_release_notes: true
