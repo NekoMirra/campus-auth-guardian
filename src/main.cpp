@@ -83,16 +83,30 @@ bool ensure_config_exists() {
     // Check if template exists
     {
         std::ifstream src(template_path, std::ios::binary);
-        if (!src.good()) {
-            return false;
-        }
-
         std::ofstream dst(config_path, std::ios::binary);
         if (!dst.good()) {
             return false;
         }
 
-        dst << src.rdbuf();
+        if (src.good()) {
+            dst << src.rdbuf();
+        } else {
+            // Fallback: generate a usable config when template is missing.
+            dst << "[network]\n"
+                   "auth_url = http://10.10.102.50/eportal/portal/login\n"
+                   "check_url = http://www.baidu.com\n"
+                   "check_interval = 30\n"
+                   "\n"
+                   "[account]\n"
+                   "user_account = ,0,YOUR_STUDENT_ID@unicom\n"
+                   "user_password = YOUR_PASSWORD\n"
+                   "# fixed_ip = 10.59.29.29\n"
+                   "\n"
+                   "[guardian]\n"
+                   "enabled = 0\n"
+                   "retry_interval = 10\n"
+                   "max_retries = 3\n";
+        }
     }
 
     return true;
