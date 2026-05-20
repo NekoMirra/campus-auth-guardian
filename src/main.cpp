@@ -10,13 +10,21 @@
 #include <chrono>
 #include <fstream>
 #include <ShlObj.h>
-#include <shellapi.h>
+#include <Shlwapi.h>
 #include <vector>
+#include <algorithm>
+#include <objbase.h>
+#include <ole2.h>
+#include <propkey.h>
 
 // ============================================================================
 // Unicode Support
 // ============================================================================
 #define MAX_PATH_LEN 512
+
+// Forward declarations
+std::wstring utf8_to_wstring(const std::string& str);
+std::string wstring_to_utf8(const std::wstring& wstr);
 
 // ============================================================================
 // Configuration
@@ -28,85 +36,147 @@ struct Config {
     std::wstring user_account;
     std::wstring user_password;
     std::wstring user_ip;
-    std::wstring fixed_ip;  // 固定IP，如果设置则优先使用
+    std::wstring fixed_ip;
     bool guardian_enabled;
     int retry_interval;
     int max_retries;
 
+    std::wstring student_id;
+    std::wstring operator_type;  // campus, cmcc, unicom, telecom
+
+    void build_user_account() {
+        if (!student_id.empty() && !operator_type.empty()) {
+            std::string id = wstring_to_utf8(student_id);
+            std::string op = wstring_to_utf8(operator_type);
+            std::string built = ",0," + id + "@" + op;
+            user_account = utf8_to_wstring(built);
+        }
+    }
+
     bool load(const std::string& path) {
-        char buf[1024];
-        auto get_val = [&](const char* section, const char* key, std::wstring& dest) {
-            GetPrivateProfileStringA(section, key, "", buf, sizeof(buf), path.c_str());
-            dest = std::wstring(buf, buf + strlen(buf));
+        std::wstring wpath(path.begin(), path.end());
+        wchar_t buf[1024];
+        auto get_val = [&](const wchar_t* section, const wchar_t* key, std::wstring& dest) {
+            GetPrivateProfileStringW(section, key, L"", buf, sizeof(buf) / sizeof(wchar_t), wpath.c_str());
+            dest = buf;
             return !dest.empty();
         };
-        auto get_int = [&](const char* section, const char* key, int def) {
-            return GetPrivateProfileIntA(section, key, def, path.c_str());
+        auto get_int = [&](const wchar_t* section, const wchar_t* key, int def) {
+            return GetPrivateProfileIntW(section, key, def, wpath.c_str());
         };
 
-        char exe_path[MAX_PATH];
-        GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-        std::string dir = exe_path;
-        size_t pos = dir.rfind('\\');
-        if (pos != std::string::npos) dir = dir.substr(0, pos);
-        std::string cfg = dir + "\\config.ini";
+        get_val(L"network", L"auth_url", auth_url);
+        get_val(L"network", L"check_url", check_url);
+        check_interval = get_int(L"network", L"check_interval", 30);
+        get_val(L"account", L"user_password", user_password);
+        get_val(L"account", L"fixed_ip", fixed_ip);
+        guardian_enabled = get_int(L"guardian", L"enabled", 0) == 1;
+        retry_interval = get_int(L"guardian", L"retry_interval", 10);
+        max_retries = get_int(L"guardian", L"max_retries", 3);
 
-        get_val("network", "auth_url", auth_url);
-        get_val("network", "check_url", check_url);
-        check_interval = get_int("network", "check_interval", 30);
-        get_val("account", "user_account", user_account);
-        get_val("account", "user_password", user_password);
-        get_val("account", "fixed_ip", fixed_ip);  // 读取固定IP配置
-        guardian_enabled = get_int("guardian", "enabled", 0) == 1;
-        retry_interval = get_int("guardian", "retry_interval", 10);
-        max_retries = get_int("guardian", "max_retries", 3);
+        // Load separate fields
+        get_val(L"account", L"student_id", student_id);
+        get_val(L"account", L"operator_type", operator_type);
+
+        if (!student_id.empty() && !operator_type.empty()) {
+            build_user_account();
+        } else {
+            // Fallback: parse old user_account format
+            get_val(L"account", L"user_account", user_account);
+            if (!user_account.empty()) {
+                std::string acct = wstring_to_utf8(user_account);
+                size_t at_pos = acct.find('@');
+                size_t comma_pos = acct.rfind(',', at_pos);
+                if (at_pos != std::string::npos && comma_pos != std::string::npos) {
+                    student_id = utf8_to_wstring(acct.substr(comma_pos + 1, at_pos - comma_pos - 1));
+                    operator_type = utf8_to_wstring(acct.substr(at_pos + 1));
+                }
+            }
+        }
+
         return !auth_url.empty() && !user_account.empty() && !user_password.empty();
+    }
+
+    void reload(const std::string& path) {
+        load(path);
+    }
+
+    void save_operator(const std::string& config_path) {
+        std::wstring wpath(config_path.begin(), config_path.end());
+        WritePrivateProfileStringW(L"account", L"operator_type",
+            operator_type.c_str(), wpath.c_str());
+        WritePrivateProfileStringW(L"account", L"student_id",
+            student_id.c_str(), wpath.c_str());
     }
 };
 
+// Embedded config template — no need for external template file
+static const char* const CONFIG_TEMPLATE =
+    "# Campus Auth Guardian \xe9\x85\x8d\xe7\xbd\xae\xe6\x96\x87\xe4\xbb\xb6\n"
+    "# \xe6\xb3\xa8\xe6\x84\x8f\xef\xbc\x9a\xe6\xad\xa4\xe6\x96\x87\xe4\xbb\xb6\xe5\xbf\x85\xe9\xa1\xbb\xe4\xbd\xbf\xe7\x94\xa8 UTF-8 \xe7\xbc\x96\xe7\xa0\x81\xe4\xbf\x9d\xe5\xad\x98\xef\xbc\x81\n"
+    "\n"
+    "[network]\n"
+    "# --- \xe7\xbd\x91\xe7\xbb\x9c\xe9\x85\x8d\xe7\xbd\xae ---\n"
+    "# \xe6\xa0\xa1\xe5\x9b\xad\xe7\xbd\x91\xe8\xae\xa4\xe8\xaf\x81\xe6\x9c\x8d\xe5\x8a\xa1\xe5\x99\xa8\xe5\x9c\xb0\xe5\x9d\x80\n"
+    "auth_url = http://10.10.102.50:801/eportal/portal/login\n"
+    "\n"
+    "# \xe7\xbd\x91\xe7\xbb\x9c\xe8\xbf\x9e\xe9\x80\x9a\xe6\x80\xa7\xe6\xa3\x80\xe6\xb5\x8b\xe5\x9c\xb0\xe5\x9d\x80\n"
+    "check_url = http://www.baidu.com\n"
+    "\n"
+    "# \xe7\xbd\x91\xe7\xbb\x9c\xe6\xa3\x80\xe6\xb5\x8b\xe9\x97\xb4\xe9\x9a\x94\xef\xbc\x88\xe7\xa7\x92\xef\xbc\x89\n"
+    "check_interval = 30\n"
+    "\n"
+    "[account]\n"
+    "# --- \xe8\xb4\xa6\xe5\x8f\xb7\xe9\x85\x8d\xe7\xbd\xae ---\n"
+    "# \xe5\xad\xa6\xe5\x8f\xb7\n"
+    "student_id = YOUR_STUDENT_ID\n"
+    "\n"
+    "# \xe8\xbf\x90\xe8\x90\xa5\xe5\x95\x86\xe7\xb1\xbb\xe5\x9e\x8b\xef\xbc\x9a campus / cmcc / unicom / telecom\n"
+    "operator_type = unicom\n"
+    "\n"
+    "# \xe8\xb4\xa6\xe5\x8f\xb7\xe5\xaf\x86\xe7\xa0\x81\n"
+    "user_password = YOUR_PASSWORD\n"
+    "\n"
+    "# \xe5\x9b\xba\xe5\xae\x9aIP\xe5\x9c\xb0\xe5\x9d\x80\xef\xbc\x88\xe5\x8f\xaf\xe9\x80\x89\xef\xbc\x8c\xe7\x95\x99\xe7\xa9\xba\xe5\x88\x99\xe8\x87\xaa\xe5\x8a\xa8\xe6\xa3\x80\xe6\xb5\x8b\xef\xbc\x89\n"
+    "fixed_ip =\n"
+    "\n"
+    "[guardian]\n"
+    "# --- \xe5\xae\x88\xe6\x8a\xa4\xe6\xa8\xa1\xe5\xbc\x8f\xe9\x85\x8d\xe7\xbd\xae ---\n"
+    "# \xe6\x98\xaf\xe5\x90\xa6\xe9\xbb\x98\xe8\xae\xa4\xe5\x90\xaf\xe7\x94\xa8\xe5\xae\x88\xe6\x8a\xa4\xe6\xa8\xa1\xe5\xbc\x8f (0/1)\n"
+    "enabled = 0\n"
+    "\n"
+    "# \xe8\xae\xa4\xe8\xaf\x81\xe5\xa4\xb1\xe8\xb4\xa5\xe5\x90\x8e\xe9\x87\x8d\xe8\xaf\x95\xe9\x97\xb4\xe9\x9a\x94\xef\xbc\x88\xe7\xa7\x92\xef\xbc\x89\n"
+    "retry_interval = 10\n"
+    "\n"
+    "# \xe6\x9c\x80\xe5\xa4\xa7\xe9\x87\x8d\xe8\xaf\x95\xe6\xac\xa1\xe6\x95\xb0\n"
+    "max_retries = 3\n";
+
+// Get exe directory as UTF-8 string (ARM64-safe)
+std::string get_exe_dir() {
+    wchar_t exe_path[MAX_PATH];
+    GetModuleFileNameW(NULL, exe_path, MAX_PATH);
+    std::wstring wdir = exe_path;
+    size_t pos = wdir.rfind(L'\\');
+    if (pos != std::wstring::npos) wdir = wdir.substr(0, pos);
+    return wstring_to_utf8(wdir);
+}
+
+std::string get_config_path() {
+    return get_exe_dir() + "\\config.ini";
+}
+
 bool ensure_config_exists() {
-    char exe_path[MAX_PATH];
-    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-    std::string dir = exe_path;
-    size_t pos = dir.rfind('\\');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
+    std::string config_path = get_config_path();
 
-    std::string config_path = dir + "\\config.ini";
-    std::string template_path = dir + "\\config.ini.template";
-
-    // If config.ini already exists, no need to create
     {
         std::ifstream test(config_path);
         if (test.good()) return true;
     }
 
-    // Check if template exists
     {
-        std::ifstream src(template_path, std::ios::binary);
         std::ofstream dst(config_path, std::ios::binary);
-        if (!dst.good()) {
-            return false;
-        }
-
-        if (src.good()) {
-            dst << src.rdbuf();
-        } else {
-            // Fallback: generate a usable config when template is missing.
-            dst << "[network]\n"
-                   "auth_url = http://10.10.102.50:801/eportal/portal/login\n"
-                   "check_url = http://www.baidu.com\n"
-                   "check_interval = 30\n"
-                   "\n"
-                   "[account]\n"
-                   "user_account = ,0,YOUR_STUDENT_ID@unicom\n"
-                   "user_password = YOUR_PASSWORD\n"
-                   "# fixed_ip = 10.59.29.29\n"
-                   "\n"
-                   "[guardian]\n"
-                   "enabled = 0\n"
-                   "retry_interval = 10\n"
-                   "max_retries = 3\n";
-        }
+        if (!dst.good()) return false;
+        dst << CONFIG_TEMPLATE;
     }
 
     return true;
@@ -115,15 +185,40 @@ bool ensure_config_exists() {
 Config g_config;
 
 // ============================================================================
-// Logging
+// Logging with rotation
 // ============================================================================
+static const size_t MAX_LOG_SIZE = 512 * 1024; // 512KB
+
+void rotate_log(const std::string& log_path) {
+    std::ifstream f(log_path, std::ios::binary | std::ios::ate);
+    if (!f.good()) return;
+    size_t size = (size_t)f.tellg();
+    f.close();
+
+    if (size < MAX_LOG_SIZE) return;
+
+    // Keep last 25% of log
+    size_t keep = size / 4;
+    std::vector<char> buf(keep);
+    {
+        std::ifstream src(log_path, std::ios::binary);
+        src.seekg(size - keep);
+        src.read(buf.data(), keep);
+    }
+    {
+        std::ofstream dst(log_path, std::ios::binary | std::ios::trunc);
+        dst.write(buf.data(), keep);
+    }
+}
+
 void write_log(const char* format, ...) {
-    char exe_path[MAX_PATH];
-    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-    std::string dir = exe_path;
-    size_t pos = dir.rfind('\\');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    std::string log_path = dir + "\\campus_auth.log";
+    static std::string log_dir;
+    if (log_dir.empty()) {
+        log_dir = get_exe_dir();
+    }
+
+    std::string log_path = log_dir + "\\campus_auth.log";
+    rotate_log(log_path);
 
     FILE* fp = fopen(log_path.c_str(), "a");
     if (!fp) return;
@@ -143,7 +238,7 @@ void write_log(const char* format, ...) {
 }
 
 // ============================================================================
-// HTTP Client with Cookies
+// HTTP Client with Cookies + Timeout
 // ============================================================================
 std::wstring utf8_to_wstring(const std::string& str) {
     if (str.empty()) return std::wstring();
@@ -175,10 +270,14 @@ std::string url_encode(const std::string& input) {
     return output;
 }
 
-HINTERNET g_hInternet = NULL;
+void set_http_timeout(HINTERNET hHandle, int connect_ms = 5000, int send_ms = 5000, int recv_ms = 10000) {
+    InternetSetOptionA(hHandle, INTERNET_OPTION_CONNECT_TIMEOUT, &connect_ms, sizeof(connect_ms));
+    InternetSetOptionA(hHandle, INTERNET_OPTION_SEND_TIMEOUT, &send_ms, sizeof(send_ms));
+    InternetSetOptionA(hHandle, INTERNET_OPTION_RECEIVE_TIMEOUT, &recv_ms, sizeof(recv_ms));
+    InternetSetOptionA(hHandle, INTERNET_OPTION_DATA_RECEIVE_TIMEOUT, &recv_ms, sizeof(recv_ms));
+}
 
 bool parse_set_cookie_header(const std::string& header_line, std::string& phpsessid) {
-    // Look for Set-Cookie: PHPSESSID=xxx; pattern
     std::string lower_line = header_line;
     for (auto& c : lower_line) c = (char)tolower((unsigned char)c);
 
@@ -186,10 +285,9 @@ bool parse_set_cookie_header(const std::string& header_line, std::string& phpses
         lower_line.find("set-cookie :") != std::string::npos) {
         size_t cookie_start = lower_line.find("phpsessid=");
         if (cookie_start != std::string::npos) {
-            cookie_start += 10; // len("phpsessid=")
+            cookie_start += 10;
             size_t cookie_end = header_line.find(";", cookie_start);
             if (cookie_end == std::string::npos) cookie_end = header_line.length();
-            // Account for potential spaces
             while (cookie_start < cookie_end && header_line[cookie_start] == ' ') cookie_start++;
             phpsessid = header_line.substr(cookie_start, cookie_end - cookie_start);
             write_log("Found PHPSESSID in Set-Cookie: %s", phpsessid.c_str());
@@ -202,15 +300,15 @@ bool parse_set_cookie_header(const std::string& header_line, std::string& phpses
 std::string fetch_login_page_and_get_cookie(std::string& phpsessid) {
     std::string response;
 
-    // Create fresh connection for each request
     HINTERNET hInternet = InternetOpenA("CampusAuth/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) {
-        write_log("InternetOpen failed");
+        write_log("InternetOpen failed: %lu", GetLastError());
         return response;
     }
+    set_http_timeout(hInternet, 5000, 5000, 8000);
 
+    // Extract base URL from auth_url (host:port only)
     std::string base_url = wstring_to_utf8(g_config.auth_url);
-    // Extract base URL without path
     size_t pos = base_url.find("://");
     if (pos != std::string::npos) {
         pos = base_url.find("/", pos + 3);
@@ -231,24 +329,17 @@ std::string fetch_login_page_and_get_cookie(std::string& phpsessid) {
         return response;
     }
 
-    // Read response headers to find Set-Cookie
     char header_buf[8192] = {0};
     DWORD header_len = sizeof(header_buf);
     if (HttpQueryInfoA(hUrl, HTTP_QUERY_RAW_HEADERS_CRLF, header_buf, &header_len, NULL)) {
-        write_log("Response headers:\n%s", header_buf);
-
-        // Parse Set-Cookie headers line by line
         char* ctx;
         char* line = strtok_s(header_buf, "\r\n", &ctx);
         while (line) {
-            if (parse_set_cookie_header(line, phpsessid)) {
-                break;
-            }
+            if (parse_set_cookie_header(line, phpsessid)) break;
             line = strtok_s(NULL, "\r\n", &ctx);
         }
     }
 
-    // Read response body
     char buf[4096];
     DWORD bytesRead;
     while (InternetReadFile(hUrl, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
@@ -262,13 +353,13 @@ std::string fetch_login_page_and_get_cookie(std::string& phpsessid) {
     if (!phpsessid.empty()) {
         write_log("PHPSESSID from headers: %s", phpsessid.c_str());
     } else {
-        write_log("PHPSESSID not found in response headers");
+        write_log("PHPSESSID not found in response headers, continuing without it");
     }
 
     return response;
 }
 
-std::string build_auth_url(const std::string& mac, const std::string& phpsessid) {
+std::string build_auth_url(const std::string& /*mac*/, const std::string& phpsessid) {
     std::string account = wstring_to_utf8(g_config.user_account);
     std::string password = wstring_to_utf8(g_config.user_password);
     std::string ip = wstring_to_utf8(g_config.user_ip);
@@ -276,10 +367,8 @@ std::string build_auth_url(const std::string& mac, const std::string& phpsessid)
     std::string encoded_account = url_encode(account);
     std::string encoded_password = url_encode(password);
 
-    // Use 000000000000 as seen in successful packet capture
     std::string mac_param = "000000000000";
 
-    // Use dr1005 and v=3015 from successful packet capture
     std::string url = wstring_to_utf8(g_config.auth_url) + "?callback=dr1005"
         "&login_method=1"
         "&user_account=" + encoded_account +
@@ -295,35 +384,34 @@ std::string build_auth_url(const std::string& mac, const std::string& phpsessid)
         "&v=3015"
         "&lang=zh";
 
+    if (!phpsessid.empty()) {
+        url += "&PHPSESSID=" + phpsessid;
+    }
+
     write_log("Auth URL: %s", url.c_str());
     return url;
 }
 
-std::string http_get_with_headers(const std::string& url, const std::string& phpsessid) {
+std::string http_get_with_cookie(const std::string& url, const std::string& phpsessid) {
     std::string result;
 
-    // Create fresh connection for each request to avoid error 12018
     HINTERNET hInternet = InternetOpenA("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
         INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
     if (!hInternet) {
-        write_log("InternetOpen failed in http_get_with_headers");
+        write_log("InternetOpen failed in http_get: %lu", GetLastError());
         return result;
     }
+    set_http_timeout(hInternet, 5000, 5000, 10000);
 
-    // Build URL with cookie as query parameter if we have one
-    std::string full_url = url;
+    // Build Cookie header if we have PHPSESSID
+    std::string headers;
     if (!phpsessid.empty()) {
-        // Check if URL already has query string
-        if (full_url.find('?') != std::string::npos) {
-            full_url += "&PHPSESSID=" + phpsessid;
-        } else {
-            full_url += "?PHPSESSID=" + phpsessid;
-        }
+        headers = "Cookie: PHPSESSID=" + phpsessid + "\r\n";
     }
 
-    write_log("Making request to: %s", full_url.c_str());
-
-    HINTERNET hUrl = InternetOpenUrlA(hInternet, full_url.c_str(), NULL, 0,
+    HINTERNET hUrl = InternetOpenUrlA(hInternet, url.c_str(),
+        headers.empty() ? NULL : headers.c_str(),
+        headers.empty() ? 0 : (DWORD)headers.length(),
         INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD, 0);
 
     if (!hUrl) {
@@ -331,6 +419,25 @@ std::string http_get_with_headers(const std::string& url, const std::string& php
         write_log("InternetOpenUrl failed: %lu", err);
         InternetCloseHandle(hInternet);
         return result;
+    }
+
+    // Check HTTP status code
+    DWORD status_code = 0;
+    DWORD status_len = sizeof(status_code);
+    if (HttpQueryInfoA(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status_code, &status_len, NULL)) {
+        write_log("HTTP status: %lu", status_code);
+        if (status_code >= 400) {
+            char buf[4096];
+            DWORD bytesRead;
+            while (InternetReadFile(hUrl, buf, sizeof(buf) - 1, &bytesRead) && bytesRead > 0) {
+                buf[bytesRead] = '\0';
+                result += buf;
+            }
+            InternetCloseHandle(hUrl);
+            InternetCloseHandle(hInternet);
+            write_log("HTTP error response: %s", result.c_str());
+            return result;
+        }
     }
 
     char buf[4096];
@@ -347,20 +454,86 @@ std::string http_get_with_headers(const std::string& url, const std::string& php
     return result;
 }
 
-bool check_internet_access() {
+// ============================================================================
+// Network Connectivity Check (Captive Portal Aware)
+// ============================================================================
+enum class NetStatus {
+    Connected,        // Real internet access
+    CaptivePortal,    // Redirected to auth portal (need to auth)
+    Disconnected,     // No network at all
+    ServerError       // Network up but check server failed
+};
+
+NetStatus check_internet_access() {
     HINTERNET hInternet = InternetOpenA("Checker/1.0", INTERNET_OPEN_TYPE_PRECONFIG, NULL, NULL, 0);
-    if (!hInternet) return false;
+    if (!hInternet) {
+        write_log("Internet check: InternetOpen failed (%lu)", GetLastError());
+        return NetStatus::Disconnected;
+    }
+    set_http_timeout(hInternet, 3000, 3000, 5000);
 
     std::string check_url = wstring_to_utf8(g_config.check_url);
-    HINTERNET hUrl = InternetOpenUrlA(hInternet, check_url.c_str(), NULL, 0,
-        INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD, 0);
 
-    bool success = (hUrl != NULL);
-    if (hUrl) InternetCloseHandle(hUrl);
+    HINTERNET hUrl = InternetOpenUrlA(hInternet, check_url.c_str(), NULL, 0,
+        INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD |
+        INTERNET_FLAG_NO_AUTO_REDIRECT, 0);
+
+    if (!hUrl) {
+        DWORD err = GetLastError();
+        InternetCloseHandle(hInternet);
+        // 12007 = DNS error, 12002 = timeout, 12029 = cannot connect
+        if (err == ERROR_INTERNET_NAME_NOT_RESOLVED || err == ERROR_INTERNET_TIMEOUT ||
+            err == ERROR_INTERNET_CANNOT_CONNECT) {
+            write_log("Internet check: disconnected (err=%lu)", err);
+            return NetStatus::Disconnected;
+        }
+        write_log("Internet check: server error (err=%lu)", err);
+        return NetStatus::ServerError;
+    }
+
+    // Check HTTP status code
+    DWORD status_code = 0;
+    DWORD status_len = sizeof(status_code);
+    HttpQueryInfoA(hUrl, HTTP_QUERY_STATUS_CODE | HTTP_QUERY_FLAG_NUMBER, &status_code, &status_len, NULL);
+
+    // Check for redirect - captive portals typically redirect (302/307)
+    if (status_code == 302 || status_code == 307 || status_code == 301) {
+        char location[1024] = {0};
+        DWORD loc_len = sizeof(location);
+        if (HttpQueryInfoA(hUrl, HTTP_QUERY_LOCATION, location, &loc_len, NULL)) {
+            write_log("Internet check: redirect to %s (captive portal)", location);
+            InternetCloseHandle(hUrl);
+            InternetCloseHandle(hInternet);
+            return NetStatus::CaptivePortal;
+        }
+    }
+
+    // Read partial body to check content
+    char buf[2048] = {0};
+    DWORD bytesRead = 0;
+    InternetReadFile(hUrl, buf, sizeof(buf) - 1, &bytesRead);
+    buf[bytesRead] = '\0';
+
+    InternetCloseHandle(hUrl);
     InternetCloseHandle(hInternet);
 
-    write_log("Internet check: %s", success ? "connected" : "disconnected");
-    return success;
+    if (status_code == 200 && bytesRead > 0) {
+        // Check if response looks like a captive portal redirect page
+        std::string body(buf, bytesRead);
+        // Common captive portal indicators
+        if (body.find("10.10.102.50") != std::string::npos ||
+            body.find("eportal") != std::string::npos ||
+            body.find("Dr.COM") != std::string::npos ||
+            body.find("PortalServer") != std::string::npos) {
+            write_log("Internet check: captive portal page detected");
+            return NetStatus::CaptivePortal;
+        }
+        write_log("Internet check: connected");
+        return NetStatus::Connected;
+    }
+
+    write_log("Internet check: unexpected status %lu", status_code);
+    return NetStatus::ServerError;
 }
 
 // ============================================================================
@@ -372,58 +545,31 @@ std::string get_local_ip() {
     PIP_ADAPTER_INFO pAdapterInfo = NULL;
     ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
 
-    // Track best IP - prefer 10.x.x.x > WiFi 192.168.x.x > Ethernet 192.168.x.x > 172.x.x.x
-    // For campus networks: 10.x.x.x is most common, but some use 192.168.x.x for WiFi
     std::string ip_best_10;
     std::string ip_wifi_192;
     std::string ip_eth_192;
-    std::string ip_172;
     std::string best_adapter_name;
 
-    // Helper to check if adapter is virtual by MAC prefix or Description
     auto is_virtual_adapter = [](PIP_ADAPTER_INFO pAdapter) -> bool {
-        // Check MAC prefix for common hypervisors
         if (pAdapter->AddressLength >= 3) {
-            // Hyper-V: 00-15-5D-xx-xx-xx
             if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x15 &&
-                pAdapter->Address[2] == 0x5D) {
-                return true;
-            }
-            // VMware: 00-50-56-xx-xx-xx
+                pAdapter->Address[2] == 0x5D) return true;
             if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x50 &&
-                pAdapter->Address[2] == 0x56) {
-                return true;
-            }
-            // VirtualBox: 08-00-27-xx-xx-xx
+                pAdapter->Address[2] == 0x56) return true;
             if (pAdapter->Address[0] == 0x08 && pAdapter->Address[1] == 0x00 &&
-                pAdapter->Address[2] == 0x27) {
-                return true;
-            }
+                pAdapter->Address[2] == 0x27) return true;
         }
 
-        // Check Description for virtual keywords
         const char* d = pAdapter->Description;
         if (d) {
-            if (strstr(d, "Hyper-V") != NULL || strstr(d, "hyper-v") != NULL ||
-                strstr(d, "vEthernet") != NULL || strstr(d, "Virtual") != NULL ||
-                strstr(d, "VMware") != NULL || strstr(d, "VirtualBox") != NULL ||
-                strstr(d, "VPN") != NULL || strstr(d, "TAP") != NULL ||
-                strstr(d, "TUN") != NULL || strstr(d, "WireGuard") != NULL ||
-                strstr(d, "OpenVPN") != NULL || strstr(d, "Docker") != NULL) {
+            if (strstr(d, "Hyper-V") || strstr(d, "hyper-v") ||
+                strstr(d, "vEthernet") || strstr(d, "Virtual") ||
+                strstr(d, "VMware") || strstr(d, "VirtualBox") ||
+                strstr(d, "VPN") || strstr(d, "TAP") ||
+                strstr(d, "TUN") || strstr(d, "WireGuard") ||
+                strstr(d, "OpenVPN") || strstr(d, "Docker")) {
                 return true;
             }
-        }
-        return false;
-    };
-
-    // Helper to check if IP is from Hyper-V default switch
-    auto is_hyperv_ip = [](const char* ip) -> bool {
-        // Hyper-V default switch uses 172.17.x.x - 172.31.x.x range
-        // But specifically 172.17.240.0/24 is common
-        if (strncmp(ip, "172.", 4) == 0) {
-            // Could be Hyper-V, but we can't be 100% sure
-            // Only skip if it looks like a virtual network IP
-            return true; // Be conservative - skip all 172.x.x.x if not sure
         }
         return false;
     };
@@ -443,22 +589,12 @@ std::string get_local_ip() {
                     while (pIpAddr) {
                         std::string addr = pIpAddr->IpAddress.String;
 
-                        // Log MAC prefix for debugging
                         if (pAdapter->AddressLength >= 3) {
                             write_log("  [%s] %s: %s (MAC: %02X-%02X-%02X-...)",
                                 type_str, pAdapter->Description, addr.c_str(),
                                 pAdapter->Address[0], pAdapter->Address[1], pAdapter->Address[2]);
-                        } else {
-                            if (is_virtual) {
-                                write_log("  [SKIP-VIRTUAL:%s] %s: %s",
-                                    type_str, pAdapter->Description, addr.c_str());
-                            } else {
-                                write_log("  [%s] %s: %s",
-                                    type_str, pAdapter->Description, addr.c_str());
-                            }
                         }
 
-                        // Only consider non-virtual, non-zero IPs
                         if (!is_virtual && addr != "0.0.0.0") {
                             bool is_wifi = (pAdapter->Type == IF_TYPE_IEEE80211);
 
@@ -466,13 +602,9 @@ std::string get_local_ip() {
                                 ip_best_10 = addr;
                                 best_adapter_name = pAdapter->Description;
                             } else if (addr.find("192.168.") == 0) {
-                                if (is_wifi && ip_wifi_192.empty()) {
-                                    ip_wifi_192 = addr;
-                                } else if (!is_wifi && ip_eth_192.empty()) {
-                                    ip_eth_192 = addr;
-                                }
-                            } else if (addr.find("172.") == 0 && ip_172.empty()) {
-                                // Skip 172.x.x.x - likely virtual network
+                                if (is_wifi && ip_wifi_192.empty()) ip_wifi_192 = addr;
+                                else if (!is_wifi && ip_eth_192.empty()) ip_eth_192 = addr;
+                            } else if (addr.find("172.") == 0) {
                                 write_log("    [SKIP-172: likely virtual network]");
                             }
                         } else if (is_virtual) {
@@ -485,25 +617,17 @@ std::string get_local_ip() {
             free(pAdapterInfo);
         }
     }
+
     write_log("=== IP Selection ===");
-    write_log("  10.x.x.x found: %s", ip_best_10.empty() ? "(none)" : ip_best_10.c_str());
-    write_log("  WiFi 192.168.x.x: %s", ip_wifi_192.empty() ? "(none)" : ip_wifi_192.c_str());
-    write_log("  Eth 192.168.x.x: %s", ip_eth_192.empty() ? "(none)" : ip_eth_192.c_str());
-    write_log("  172.x.x.x found: %s (skipped)", ip_172.empty() ? "(none)" : ip_172.c_str());
+    write_log("  10.x.x.x: %s", ip_best_10.empty() ? "(none)" : ip_best_10.c_str());
+    write_log("  WiFi 192.168: %s", ip_wifi_192.empty() ? "(none)" : ip_wifi_192.c_str());
+    write_log("  Eth 192.168: %s", ip_eth_192.empty() ? "(none)" : ip_eth_192.c_str());
     write_log("  Best adapter: %s", best_adapter_name.empty() ? "(none)" : best_adapter_name.c_str());
 
-    // Priority: 10.x.x.x > WiFi 192.168.x.x > Ethernet 192.168.x.x > 172.x.x.x
     std::string ip;
-    if (!ip_best_10.empty()) {
-        ip = ip_best_10;
-    } else if (!ip_wifi_192.empty()) {
-        ip = ip_wifi_192;
-    } else if (!ip_eth_192.empty()) {
-        ip = ip_eth_192;
-    } else if (!ip_172.empty()) {
-        ip = ip_172; // Fallback - should rarely happen
-    }
-    write_log("  Selected: %s", ip.empty() ? "(none)" : ip.c_str());
+    if (!ip_best_10.empty()) ip = ip_best_10;
+    else if (!ip_wifi_192.empty()) ip = ip_wifi_192;
+    else if (!ip_eth_192.empty()) ip = ip_eth_192;
 
     if (ip.empty()) {
         char hostname[256];
@@ -526,45 +650,26 @@ std::string get_local_ip() {
 
 std::string get_local_mac() {
     std::string mac;
-
     PIP_ADAPTER_INFO pAdapterInfo = NULL;
     ULONG ulOutBufLen = sizeof(IP_ADAPTER_INFO);
-
-    // Helper to check if adapter is virtual by MAC prefix
-    auto is_virtual_mac = [](PIP_ADAPTER_INFO pAdapter) -> bool {
-        if (pAdapter->AddressLength >= 3) {
-            // Hyper-V: 00-15-5D-xx-xx-xx
-            if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x15 &&
-                pAdapter->Address[2] == 0x5D) {
-                return true;
-            }
-            // VMware: 00-50-56-xx-xx-xx
-            if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x50 &&
-                pAdapter->Address[2] == 0x56) {
-                return true;
-            }
-            // VirtualBox: 08-00-27-xx-xx-xx
-            if (pAdapter->Address[0] == 0x08 && pAdapter->Address[1] == 0x00 &&
-                pAdapter->Address[2] == 0x27) {
-                return true;
-            }
-        }
-        return false;
-    };
 
     if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == ERROR_BUFFER_OVERFLOW) {
         pAdapterInfo = (IP_ADAPTER_INFO*)malloc(ulOutBufLen);
         if (pAdapterInfo) {
             if (GetAdaptersInfo(pAdapterInfo, &ulOutBufLen) == NO_ERROR) {
                 for (PIP_ADAPTER_INFO pAdapter = pAdapterInfo; pAdapter; pAdapter = pAdapter->Next) {
-                    // Skip virtual adapters by MAC prefix
-                    if (is_virtual_mac(pAdapter)) continue;
+                    bool is_virtual = false;
+                    if (pAdapter->AddressLength >= 3) {
+                        if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x15 && pAdapter->Address[2] == 0x5D) is_virtual = true;
+                        if (pAdapter->Address[0] == 0x00 && pAdapter->Address[1] == 0x50 && pAdapter->Address[2] == 0x56) is_virtual = true;
+                        if (pAdapter->Address[0] == 0x08 && pAdapter->Address[1] == 0x00 && pAdapter->Address[2] == 0x27) is_virtual = true;
+                    }
+                    if (is_virtual) continue;
 
                     if (pAdapter->Type == MIB_IF_TYPE_ETHERNET || pAdapter->Type == IF_TYPE_IEEE80211) {
                         IP_ADDR_STRING* pIpAddr = &pAdapter->IpAddressList;
                         while (pIpAddr) {
                             std::string addr = pIpAddr->IpAddress.String;
-                            // Only get MAC for non-virtual, non-zero IPs
                             if (addr != "0.0.0.0") {
                                 char mac_str[32];
                                 snprintf(mac_str, sizeof(mac_str),
@@ -589,10 +694,141 @@ std::string get_local_mac() {
     return mac;
 }
 
+// Parse JSONP response fields
+struct AuthResult {
+    int result = -1;       // 0=fail, 1=success
+    int ret_code = -1;     // eportal specific error code
+    std::string msg;
+};
+
+AuthResult parse_jsonp_response(const std::string& response) {
+    AuthResult ar;
+
+    // Extract content between parentheses: dr1005({...})
+    size_t start = response.find("({");
+    size_t end = response.rfind("})");
+    if (start == std::string::npos || end == std::string::npos) {
+        ar.msg = "Invalid response format";
+        return ar;
+    }
+
+    std::string json = response.substr(start + 2, end - start - 2);
+
+    // Parse "result"
+    {
+        size_t pos = json.find("\"result\":");
+        if (pos != std::string::npos) {
+            pos += 9;
+            while (pos < json.size() && json[pos] == ' ') pos++;
+            ar.result = atoi(json.c_str() + pos);
+        }
+    }
+
+    // Parse "ret_code"
+    {
+        size_t pos = json.find("\"ret_code\":");
+        if (pos != std::string::npos) {
+            pos += 11;
+            while (pos < json.size() && json[pos] == ' ') pos++;
+            ar.ret_code = atoi(json.c_str() + pos);
+        }
+    }
+
+    // Parse "msg"
+    {
+        size_t pos = json.find("\"msg\":\"");
+        if (pos != std::string::npos) {
+            pos += 7;
+            size_t end_pos = json.find("\"", pos);
+            if (end_pos != std::string::npos) {
+                ar.msg = json.substr(pos, end_pos - pos);
+            }
+        }
+    }
+
+    return ar;
+}
+
+// Map ret_code to user-friendly Chinese message (based on portal a40.js portal_login_err)
+// ret_code=2 (IP already online) is treated as success by the caller, not here
+std::string get_auth_error_message(int result, int ret_code, const std::string& msg) {
+    // result=1 is always success regardless of ret_code
+    if (result == 1) return "认证成功";
+
+    // EPortal ret_code mapping (from Dr.COM portal JavaScript a40.js)
+    switch (ret_code) {
+        case 1:  return "AC认证失败 - 可能IP地址不匹配或账号异常";
+        case 2:  return "终端IP已经在线";
+        case 3:  return "系统繁忙，请稍后重试";
+        case 5:  return "REQ_CHALLENGE失败，请检查AC确认";
+        case 6:  return "REQ_CHALLENGE超时，请检查AC确认";
+        case 7:  return "Radius认证失败";
+        case 8:  return "Radius认证超时";
+        case 9:  return "Radius计费失败";
+        case 10: return "Radius计费超时";
+        case 11: return "服务器维护中，请稍后重试";
+        case 998: return "Portal协议异常不全，请稍后重试";
+        default: break;
+    }
+
+    // Fallback to server-provided msg (often contains useful detail like "IP: x.x.x.x 已经在线！")
+    if (!msg.empty()) return msg;
+
+    return "AC认证失败(未知错误)";
+}
+
+bool do_auth_with_ip(const std::string& ip, const std::string& mac, const std::string& phpsessid, std::string* msg) {
+    g_config.user_ip = utf8_to_wstring(ip);
+    std::string url = build_auth_url(mac, phpsessid);
+    std::string response = http_get_with_cookie(url, phpsessid);
+
+    if (response.empty()) {
+        if (msg) *msg = "服务器无响应 - 请检查网络连接";
+        write_log("Auth failed: empty response");
+        return false;
+    }
+
+    // Check for HTTP error page (not JSONP)
+    if (response.find("dr1005(") == std::string::npos &&
+        response.find("dr1003(") == std::string::npos) {
+        if (response.find("404") != std::string::npos ||
+            response.find("Error") != std::string::npos ||
+            response.find("Not Found") != std::string::npos) {
+            if (msg) *msg = "认证服务器地址错误(404) - 请检查config.ini中auth_url是否包含端口号801";
+            write_log("Auth failed: server returned error page, auth_url may be wrong (missing :801 port?)");
+            return false;
+        }
+        if (msg) *msg = "服务器返回非预期响应";
+        write_log("Auth failed: non-JSONP response: %s", response.substr(0, 200).c_str());
+        return false;
+    }
+
+    // Parse JSONP response
+    AuthResult ar = parse_jsonp_response(response);
+    std::string error_msg = get_auth_error_message(ar.result, ar.ret_code, ar.msg);
+
+    // result=1: login success
+    // result=0, ret_code=2: IP already online — treat as success
+    if (ar.result == 1) {
+        if (msg) *msg = "认证成功";
+        write_log("Auth success");
+        return true;
+    }
+
+    if (ar.result == 0 && ar.ret_code == 2) {
+        if (msg) *msg = ar.msg.empty() ? "终端IP已经在线" : ar.msg;
+        write_log("Auth: already online (ret_code=2)");
+        return true;
+    }
+
+    if (msg) *msg = error_msg;
+    write_log("Auth failed: result=%d ret_code=%d msg=%s", ar.result, ar.ret_code, ar.msg.c_str());
+    return false;
+}
+
 bool authenticate(std::string* msg = nullptr) {
     std::string ip;
 
-    // 如果配置了固定IP，优先使用
     if (!g_config.fixed_ip.empty()) {
         ip = wstring_to_utf8(g_config.fixed_ip);
         write_log("Using fixed IP from config: %s", ip.c_str());
@@ -603,57 +839,29 @@ bool authenticate(std::string* msg = nullptr) {
     std::string mac = get_local_mac();
 
     if (ip.empty()) {
-        if (msg) *msg = "Cannot get local IP";
+        if (msg) *msg = "无法获取本机IP地址";
         write_log("Auth failed: cannot get local IP");
         return false;
     }
 
-    g_config.user_ip = utf8_to_wstring(ip);
-
     // Step 1: Fetch login page to get PHPSESSID cookie
     std::string phpsessid;
     std::string login_page = fetch_login_page_and_get_cookie(phpsessid);
-    if (phpsessid.empty()) {
-        write_log("Warning: Could not get PHPSESSID, trying without it");
-    }
+    // PHPSESSID is optional - we continue even without it
 
-    // Step 2: Build auth URL and send request
-    std::string url = build_auth_url(mac, phpsessid);
-    std::string response = http_get_with_headers(url, phpsessid);
+    // Step 2: Authenticate with configured IP
+    bool success = do_auth_with_ip(ip, mac, phpsessid, msg);
 
-    if (response.empty()) {
-        if (msg) *msg = "No response from server";
-        write_log("Auth failed: empty response");
-        return false;
-    }
-
-    // Parse JSONP response: dr1010({"result":1,"msg":"xxx"})
-    if (response.find("\"result\":1") != std::string::npos ||
-        response.find("\"result\": 1") != std::string::npos ||
-        response.find("\"result\":1,") != std::string::npos) {
-        if (msg) *msg = "Login successful";
-        write_log("Auth success");
-        return true;
-    }
-
-    // Extract error message
-    if (msg) {
-        size_t start = response.find("\"msg\":\"");
-        if (start != std::string::npos) {
-            start += 7;
-            size_t end = response.find("\"", start);
-            if (end != std::string::npos) {
-                *msg = response.substr(start, end - start);
-            } else {
-                *msg = "Login failed";
-            }
-        } else {
-            *msg = "Login failed";
+    // Step 3: If using fixed_ip and auth failed, try auto-detected IP as fallback
+    if (!success && !g_config.fixed_ip.empty()) {
+        std::string auto_ip = get_local_ip();
+        if (!auto_ip.empty() && auto_ip != ip) {
+            write_log("Fixed IP auth failed, retrying with auto-detected IP: %s -> %s", ip.c_str(), auto_ip.c_str());
+            success = do_auth_with_ip(auto_ip, mac, phpsessid, msg);
         }
     }
 
-    write_log("Auth failed: %s", msg ? msg->c_str() : "unknown");
-    return false;
+    return success;
 }
 
 // ============================================================================
@@ -667,6 +875,11 @@ bool authenticate(std::string* msg = nullptr) {
 #define ID_TRAY_AUTOSTART 1005
 #define ID_TRAY_LOGOUT 1006
 #define ID_TRAY_OPEN_CONFIG 1007
+#define ID_TRAY_RELOAD_CONFIG 1008
+#define ID_TRAY_OP_CAMPUS 1101
+#define ID_TRAY_OP_CMCC 1102
+#define ID_TRAY_OP_UNICOM 1103
+#define ID_TRAY_OP_TELECOM 1104
 
 std::atomic<bool> g_running{true};
 std::atomic<bool> g_guardian_active{false};
@@ -676,70 +889,29 @@ std::atomic<bool> g_autostart_enabled{false};
 HANDLE g_guardian_thread = NULL;
 
 enum class TrayIconState {
-    Connected,    // Checkmark icon (green)
-    Guardian,     // Shield icon (blue)
-    Disconnected, // X icon (red)
-    Reconnecting // Animated or different state
+    Connected,
+    Guardian,
+    Disconnected,
+    Reconnecting
 };
 
 std::atomic<TrayIconState> g_icon_state{TrayIconState::Connected};
 
 NOTIFYICONDATAW g_nid = {};
 
-// Create a simple colored icon programmatically
-HICON create_colored_icon(COLORREF bg_color) {
-    int size = 16;
-    HDC hdcScreen = GetDC(NULL);
-    HDC hdcMem = CreateCompatibleDC(hdcScreen);
-    HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, size, size);
-    HBITMAP hBmpOld = (HBITMAP)SelectObject(hdcMem, hBmp);
-
-    // Fill background with color
-    HBRUSH hBrush = CreateSolidBrush(bg_color);
-    RECT rect = {0, 0, size, size};
-    FillRect(hdcMem, &rect, hBrush);
-    DeleteObject(hBrush);
-
-    // Draw simple shape (circle) for cleaner look
-    HBRUSH hFillBrush = CreateSolidBrush(RGB(255, 255, 255));
-    HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcMem, hFillBrush);
-    HPEN hPen = CreatePen(PS_SOLID, 1, RGB(200, 200, 200));
-    HPEN hOldPen = (HPEN)SelectObject(hdcMem, hPen);
-    Ellipse(hdcMem, 2, 2, size - 2, size - 2);
-    SelectObject(hdcMem, hOldBrush);
-    DeleteObject(hFillBrush);
-    DeleteObject(hPen);
-
-    SelectObject(hdcMem, hBmpOld);
-    DeleteDC(hdcMem);
-    ReleaseDC(NULL, hdcScreen);
-
-    ICONINFO ii = {0};
-    ii.fIcon = TRUE;
-    ii.hbmColor = hBmp;
-    ii.hbmMask = hBmp;
-
-    HICON hIcon = CreateIconIndirect(&ii);
-    DeleteObject(hBmp);
-
-    return hIcon;
-}
-
-// Create checkmark icon (green)
 HICON create_checkmark_icon() {
-    int size = 16;
+    int size = GetSystemMetrics(SM_CXSMICON);
+    if (size <= 0) size = 16;
     HDC hdcScreen = GetDC(NULL);
     HDC hdcMem = CreateCompatibleDC(hdcScreen);
     HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, size, size);
     HBITMAP hBmpOld = (HBITMAP)SelectObject(hdcMem, hBmp);
 
-    // Green background
-    HBRUSH hBrush = CreateSolidBrush(RGB(34, 197, 94)); // Green
+    HBRUSH hBrush = CreateSolidBrush(RGB(34, 197, 94));
     RECT rect = {0, 0, size, size};
     FillRect(hdcMem, &rect, hBrush);
     DeleteObject(hBrush);
 
-    // Draw white checkmark
     HPEN hPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
     HPEN hOldPen = (HPEN)SelectObject(hdcMem, hPen);
     MoveToEx(hdcMem, 4, 8, NULL);
@@ -748,7 +920,6 @@ HICON create_checkmark_icon() {
 
     SelectObject(hdcMem, hOldPen);
     DeleteObject(hPen);
-
     SelectObject(hdcMem, hBmpOld);
     DeleteDC(hdcMem);
     ReleaseDC(NULL, hdcScreen);
@@ -757,52 +928,33 @@ HICON create_checkmark_icon() {
     ii.fIcon = TRUE;
     ii.hbmColor = hBmp;
     ii.hbmMask = hBmp;
-
     HICON hIcon = CreateIconIndirect(&ii);
     DeleteObject(hBmp);
-
     return hIcon;
 }
 
-// Create shield icon (blue)
 HICON create_shield_icon() {
-    int size = 16;
+    int size = GetSystemMetrics(SM_CXSMICON);
+    if (size <= 0) size = 16;
     HDC hdcScreen = GetDC(NULL);
     HDC hdcMem = CreateCompatibleDC(hdcScreen);
     HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, size, size);
     HBITMAP hBmpOld = (HBITMAP)SelectObject(hdcMem, hBmp);
 
-    // Blue background
-    HBRUSH hBrush = CreateSolidBrush(RGB(59, 130, 246)); // Blue
+    HBRUSH hBrush = CreateSolidBrush(RGB(59, 130, 246));
     RECT rect = {0, 0, size, size};
     FillRect(hdcMem, &rect, hBrush);
     DeleteObject(hBrush);
 
-    // Draw white shield shape
     HPEN hPen = CreatePen(PS_SOLID, 1, RGB(255, 255, 255));
     HPEN hOldPen = (HPEN)SelectObject(hdcMem, hPen);
     HBRUSH hFillBrush = CreateSolidBrush(RGB(255, 255, 255));
     HBRUSH hOldBrush = (HBRUSH)SelectObject(hdcMem, hFillBrush);
 
-    POINT shield[] = {
-        {8, 2},   // top
-        {13, 4},  // top right
-        {13, 8},  // mid right
-        {8, 14},  // bottom
-        {3, 8},   // mid left
-        {3, 4}    // top left
-    };
+    POINT shield[] = {{8,2},{13,4},{13,8},{8,14},{3,8},{3,4}};
     Polygon(hdcMem, shield, 6);
 
-    // Draw inner shield border
-    POINT innerShield[] = {
-        {8, 4},   // top
-        {11, 5},  // top right
-        {11, 8},  // mid right
-        {8, 12},  // bottom
-        {5, 8},   // mid left
-        {5, 5}    // top left
-    };
+    POINT innerShield[] = {{8,4},{11,5},{11,8},{8,12},{5,8},{5,5}};
     HBRUSH hInnerBrush = CreateSolidBrush(RGB(59, 130, 246));
     SelectObject(hdcMem, hInnerBrush);
     Polygon(hdcMem, innerShield, 6);
@@ -812,7 +964,6 @@ HICON create_shield_icon() {
     SelectObject(hdcMem, hOldPen);
     DeleteObject(hFillBrush);
     DeleteObject(hPen);
-
     SelectObject(hdcMem, hBmpOld);
     DeleteDC(hdcMem);
     ReleaseDC(NULL, hdcScreen);
@@ -821,31 +972,26 @@ HICON create_shield_icon() {
     ii.fIcon = TRUE;
     ii.hbmColor = hBmp;
     ii.hbmMask = hBmp;
-
     HICON hIcon = CreateIconIndirect(&ii);
     DeleteObject(hBmp);
-
     return hIcon;
 }
 
-// Create X icon (red)
 HICON create_x_icon() {
-    int size = 16;
+    int size = GetSystemMetrics(SM_CXSMICON);
+    if (size <= 0) size = 16;
     HDC hdcScreen = GetDC(NULL);
     HDC hdcMem = CreateCompatibleDC(hdcScreen);
     HBITMAP hBmp = CreateCompatibleBitmap(hdcScreen, size, size);
     HBITMAP hBmpOld = (HBITMAP)SelectObject(hdcMem, hBmp);
 
-    // Red background
-    HBRUSH hBrush = CreateSolidBrush(RGB(239, 68, 68)); // Red
+    HBRUSH hBrush = CreateSolidBrush(RGB(239, 68, 68));
     RECT rect = {0, 0, size, size};
     FillRect(hdcMem, &rect, hBrush);
     DeleteObject(hBrush);
 
-    // Draw white X
     HPEN hPen = CreatePen(PS_SOLID, 2, RGB(255, 255, 255));
     HPEN hOldPen = (HPEN)SelectObject(hdcMem, hPen);
-
     MoveToEx(hdcMem, 4, 4, NULL);
     LineTo(hdcMem, 12, 12);
     MoveToEx(hdcMem, 12, 4, NULL);
@@ -853,7 +999,6 @@ HICON create_x_icon() {
 
     SelectObject(hdcMem, hOldPen);
     DeleteObject(hPen);
-
     SelectObject(hdcMem, hBmpOld);
     DeleteDC(hdcMem);
     ReleaseDC(NULL, hdcScreen);
@@ -862,10 +1007,8 @@ HICON create_x_icon() {
     ii.fIcon = TRUE;
     ii.hbmColor = hBmp;
     ii.hbmMask = hBmp;
-
     HICON hIcon = CreateIconIndirect(&ii);
     DeleteObject(hBmp);
-
     return hIcon;
 }
 
@@ -876,7 +1019,246 @@ void update_tray_tooltip(const wchar_t* status) {
     Shell_NotifyIconW(NIM_MODIFY, &g_nid);
 }
 
+// ============================================================================
+// Windows Toast Notification (Action Center) via COM/WinRT
+// ============================================================================
+// WinRT HSTRING type — MinGW doesn't define it; we dynamically load all WinRT APIs
+#ifndef _HSTRING_DEFINED_
+typedef struct HSTRING__* HSTRING;
+#endif
+
+// AUMID must match a Start Menu shortcut for toast to appear in Action Center
+static const wchar_t* TOAST_AUMID = L"CampusAuthGuardian";
+static bool g_toast_available = false;
+static bool g_toast_checked = false;
+
+// COM initialization — done once at startup
+struct ComInit {
+    bool ok;
+    ComInit() { ok = SUCCEEDED(CoInitializeEx(NULL, COINIT_APARTMENTTHREADED)); }
+    ~ComInit() { if (ok) CoUninitialize(); }
+};
+static ComInit g_com_init;
+
+// IXmlDocumentIO — LoadXml method for WinRT XmlDocument
+struct IXmlDocumentIO_Custom : IUnknown {
+    virtual HRESULT STDMETHODCALLTYPE LoadXml(HSTRING xml) = 0;
+};
+// XML-escape text for toast content (handles < > & " ')
+std::wstring xml_escape(const std::wstring& s) {
+    std::wstring out;
+    out.reserve(s.size());
+    for (wchar_t c : s) {
+        switch (c) {
+            case L'<': out += L"&lt;"; break;
+            case L'>': out += L"&gt;"; break;
+            case L'&': out += L"&amp;"; break;
+            case L'"': out += L"&quot;"; break;
+            case L'\'': out += L"&apos;"; break;
+            default: out += c; break;
+        }
+    }
+    return out;
+}
+
+bool send_toast_impl(const wchar_t* title, const wchar_t* message) {
+    // Dynamically load WinRT functions — works on x86/x64/ARM64
+    HMODULE hRT = LoadLibraryExW(L"api-ms-win-core-winrt-l1-1-0.dll", NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (!hRT) hRT = LoadLibraryW(L"runtimeobject.dll");
+    if (!hRT) return false;
+
+    typedef HRESULT(WINAPI* RoGetActivationFactory_t)(HSTRING, REFIID, void**);
+    typedef HRESULT(WINAPI* WindowsCreateString_t)(PCWSTR, UINT32, HSTRING*);
+    typedef HRESULT(WINAPI* WindowsDeleteString_t)(HSTRING);
+    typedef HRESULT(WINAPI* RoActivateInstance_t)(HSTRING, void**);
+    typedef HRESULT(WINAPI* RoInitialize_t)(int);
+
+    auto fnRoInit = (RoInitialize_t)GetProcAddress(hRT, "RoInitialize");
+    auto fnCreateStr = (WindowsCreateString_t)GetProcAddress(hRT, "WindowsCreateString");
+    auto fnDeleteStr = (WindowsDeleteString_t)GetProcAddress(hRT, "WindowsDeleteString");
+    auto fnGetFactory = (RoGetActivationFactory_t)GetProcAddress(hRT, "RoGetActivationFactory");
+    auto fnActivate = (RoActivateInstance_t)GetProcAddress(hRT, "RoActivateInstance");
+
+    if (!fnCreateStr || !fnDeleteStr || !fnGetFactory || !fnActivate) return false;
+    if (fnRoInit) fnRoInit(1);
+
+    auto makeHs = [&](const wchar_t* s) -> HSTRING {
+        HSTRING hs = nullptr;
+        fnCreateStr(s, (UINT32)wcslen(s), &hs);
+        return hs;
+    };
+
+    // 1. Create XmlDocument and load XML
+    HSTRING hsXmlType = makeHs(L"Windows.Data.Xml.Dom.XmlDocument");
+    void* pXmlInst = nullptr;
+    HRESULT hr = fnActivate(hsXmlType, &pXmlInst);
+    fnDeleteStr(hsXmlType);
+    if (FAILED(hr) || !pXmlInst) { write_log("Toast: activate XmlDocument failed 0x%08lX", hr); return false; }
+
+    // QI for IXmlDocumentIO to call LoadXml
+    // IID {6CD3AC84-1848-457C-B1E2-BC44-DA81711F}
+    IID iid_XmlDocIO = {0x6CD3AC84, 0x1848, 0x457C, {0xB1, 0xE2, 0xBC, 0x44, 0xDA, 0x81, 0x71, 0x1F}};
+    IXmlDocumentIO_Custom* pXmlIO = nullptr;
+    hr = ((IUnknown*)pXmlInst)->QueryInterface(iid_XmlDocIO, (void**)&pXmlIO);
+    if (FAILED(hr) || !pXmlIO) {
+        write_log("Toast: QI IXmlDocumentIO failed 0x%08lX", hr);
+        ((IUnknown*)pXmlInst)->Release();
+        return false;
+    }
+
+    std::wstring xml = L"<toast><visual><binding template='ToastGeneric'>"
+        L"<text>" + xml_escape(title) + L"</text>"
+        L"<text>" + xml_escape(message) + L"</text>"
+        L"</binding></visual></toast>";
+
+    HSTRING hsXml = makeHs(xml.c_str());
+    hr = pXmlIO->LoadXml(hsXml);
+    fnDeleteStr(hsXml);
+    pXmlIO->Release(); // pXmlInst still alive
+    if (FAILED(hr)) {
+        write_log("Toast: LoadXml failed 0x%08lX", hr);
+        ((IUnknown*)pXmlInst)->Release();
+        return false;
+    }
+
+    // 2. Create ToastNotification from XmlDocument
+    HSTRING hsToastType = makeHs(L"Windows.UI.Notifications.ToastNotification");
+    // IID {04124B20-82C6-4229-B110-1E6E73134EB4} — IToastNotificationFactory
+    IID iid_ToastFactory = {0x04124B20, 0x82C6, 0x4229, {0xB1, 0x10, 0x1E, 0x6E, 0x73, 0x13, 0x4E, 0xB4}};
+    void* pToastFactoryRaw = nullptr;
+    hr = fnGetFactory(hsToastType, iid_ToastFactory, &pToastFactoryRaw);
+    fnDeleteStr(hsToastType);
+    if (FAILED(hr) || !pToastFactoryRaw) {
+        write_log("Toast: get ToastNotificationFactory failed 0x%08lX", hr);
+        ((IUnknown*)pXmlInst)->Release();
+        return false;
+    }
+
+    struct IToastNotificationFactory_C : IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE CreateToastNotification(void* content, void** notification) = 0;
+    };
+    auto pToastFactory = static_cast<IToastNotificationFactory_C*>(pToastFactoryRaw);
+
+    void* pToastNotif = nullptr;
+    hr = pToastFactory->CreateToastNotification(pXmlInst, &pToastNotif);
+    pToastFactory->Release();
+    ((IUnknown*)pXmlInst)->Release();
+    if (FAILED(hr) || !pToastNotif) {
+        write_log("Toast: CreateToastNotification failed 0x%08lX", hr);
+        return false;
+    }
+
+    // 3. Get ToastNotifier and Show
+    HSTRING hsManagerType = makeHs(L"Windows.UI.Notifications.ToastNotificationManager");
+    // IID {53BFB467-74D5-4B0B-B224-97A4918D2414} — IToastNotificationManagerStatics
+    IID iid_ManagerStatics = {0x53BFB467, 0x74D5, 0x4B0B, {0xB2, 0x24, 0x97, 0xA4, 0x91, 0x8D, 0x24, 0x14}};
+    void* pManagerRaw = nullptr;
+    hr = fnGetFactory(hsManagerType, iid_ManagerStatics, &pManagerRaw);
+    fnDeleteStr(hsManagerType);
+    if (FAILED(hr) || !pManagerRaw) {
+        write_log("Toast: get ManagerStatics failed 0x%08lX", hr);
+        ((IUnknown*)pToastNotif)->Release();
+        return false;
+    }
+
+    struct IToastNotificationManagerStatics_C : IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE CreateToastNotifierWithId(HSTRING id, void** notifier) = 0;
+    };
+    auto pManager = static_cast<IToastNotificationManagerStatics_C*>(pManagerRaw);
+
+    HSTRING hsAumid = makeHs(TOAST_AUMID);
+    void* pNotifierRaw = nullptr;
+    hr = pManager->CreateToastNotifierWithId(hsAumid, &pNotifierRaw);
+    fnDeleteStr(hsAumid);
+    pManager->Release();
+    if (FAILED(hr) || !pNotifierRaw) {
+        write_log("Toast: CreateToastNotifier failed 0x%08lX", hr);
+        ((IUnknown*)pToastNotif)->Release();
+        return false;
+    }
+
+    struct IToastNotifier_C : IUnknown {
+        virtual HRESULT STDMETHODCALLTYPE Show(void* notification) = 0;
+        virtual HRESULT STDMETHODCALLTYPE Hide(void* notification) = 0;
+    };
+    auto pNotifier = static_cast<IToastNotifier_C*>(pNotifierRaw);
+
+    hr = pNotifier->Show(pToastNotif);
+    pNotifier->Release();
+    ((IUnknown*)pToastNotif)->Release();
+
+    if (FAILED(hr)) {
+        write_log("Toast: Show failed 0x%08lX", hr);
+        return false;
+    }
+
+    write_log("Toast notification sent successfully");
+    return true;
+}
+
+// Create a Start Menu shortcut with AUMID so toast notifications are attributed
+void ensure_toast_shortcut() {
+    wchar_t appdata[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_APPDATA, NULL, 0, appdata))) {
+        std::wstring dir = std::wstring(appdata) + L"\\Microsoft\\Windows\\Start Menu\\Programs\\";
+        CreateDirectoryW(dir.c_str(), NULL);
+        std::wstring lnk_path = dir + L"Campus Auth Guardian.lnk";
+
+        if (GetFileAttributesW(lnk_path.c_str()) != INVALID_FILE_ATTRIBUTES) return;
+
+        wchar_t exe_path[MAX_PATH];
+        GetModuleFileNameW(NULL, exe_path, MAX_PATH);
+
+        IShellLinkW* pLink = nullptr;
+        if (SUCCEEDED(CoCreateInstance(CLSID_ShellLink, NULL, CLSCTX_INPROC_SERVER,
+            IID_IShellLinkW, (void**)&pLink))) {
+            pLink->SetPath(exe_path);
+            std::wstring work_dir = exe_path;
+            size_t pos = work_dir.rfind(L'\\');
+            if (pos != std::wstring::npos) work_dir = work_dir.substr(0, pos);
+            pLink->SetWorkingDirectory(work_dir.c_str());
+
+            // Set AUMID via IPropertyStore
+            IPropertyStore* pPropStore = nullptr;
+            if (SUCCEEDED(pLink->QueryInterface(IID_IPropertyStore, (void**)&pPropStore))) {
+                PROPVARIANT pv;
+                PropVariantInit(&pv);
+                pv.vt = VT_LPWSTR;
+                pv.pwszVal = (wchar_t*)TOAST_AUMID;
+                static const PROPERTYKEY PKEY_AppUserModel_ID = {
+                    {0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5
+                };
+                pPropStore->SetValue(PKEY_AppUserModel_ID, pv);
+                pPropStore->Commit();
+                PropVariantClear(&pv);
+                pPropStore->Release();
+            }
+
+            IPersistFile* pPersist = nullptr;
+            if (SUCCEEDED(pLink->QueryInterface(IID_IPersistFile, (void**)&pPersist))) {
+                pPersist->Save(lnk_path.c_str(), TRUE);
+                pPersist->Release();
+            }
+            pLink->Release();
+        }
+        write_log("Created Start Menu shortcut for toast AUMID");
+    }
+}
+
 void show_notification(const wchar_t* title, const wchar_t* message) {
+    // Try Action Center toast first
+    if (g_toast_available || !g_toast_checked) {
+        if (send_toast_impl(title, message)) {
+            g_toast_available = true;
+            g_toast_checked = true;
+            return;
+        }
+        g_toast_checked = true;
+        g_toast_available = false;
+        write_log("Toast unavailable, falling back to Shell_NotifyIconW");
+    }
+
+    // Fallback: tray balloon notification
     g_nid.uFlags = NIF_INFO;
     wcsncpy(g_nid.szInfoTitle, title, sizeof(g_nid.szInfoTitle) / sizeof(wchar_t) - 1);
     wcsncpy(g_nid.szInfo, message, sizeof(g_nid.szInfo) / sizeof(wchar_t) - 1);
@@ -886,22 +1268,14 @@ void show_notification(const wchar_t* title, const wchar_t* message) {
 
 void update_tray_icon() {
     g_nid.uFlags = NIF_ICON | NIF_TIP;
-
     HICON icon = NULL;
     switch (g_icon_state) {
-        case TrayIconState::Connected:
-            icon = create_checkmark_icon();
-            break;
-        case TrayIconState::Guardian:
-            icon = create_shield_icon();
-            break;
+        case TrayIconState::Connected: icon = create_checkmark_icon(); break;
+        case TrayIconState::Guardian: icon = create_shield_icon(); break;
         case TrayIconState::Disconnected:
         case TrayIconState::Reconnecting:
-        default:
-            icon = create_x_icon();
-            break;
+        default: icon = create_x_icon(); break;
     }
-
     if (icon) {
         g_nid.hIcon = icon;
         Shell_NotifyIconW(NIM_MODIFY, &g_nid);
@@ -915,14 +1289,24 @@ void guardian_loop() {
     update_tray_icon();
     write_log("Guardian started");
 
-    while (g_running && g_guardian_enabled) {
-        bool connected = check_internet_access();
+    int consecutive_failures = 0;
 
-        if (!connected) {
+    while (g_running && g_guardian_enabled) {
+        NetStatus net = check_internet_access();
+
+        if (net == NetStatus::Connected) {
+            consecutive_failures = 0;
+            // Already connected, just wait
+            if (g_icon_state != TrayIconState::Guardian) {
+                g_icon_state = TrayIconState::Guardian;
+                update_tray_icon();
+                update_tray_tooltip(L"已连接 - 守护中");
+            }
+        } else if (net == NetStatus::CaptivePortal || net == NetStatus::Disconnected) {
             g_icon_state = TrayIconState::Disconnected;
             update_tray_icon();
-            write_log("Network disconnected, starting auth...");
-            update_tray_tooltip(L"Disconnected, reconnecting...");
+            write_log("Network disconnected/captive portal, starting auth...");
+            update_tray_tooltip(L"断开连接, 重新认证中...");
 
             std::string msg;
             int retry_count = 0;
@@ -931,28 +1315,48 @@ void guardian_loop() {
             while (retry_count < g_config.max_retries && !success && g_running) {
                 if (authenticate(&msg)) {
                     success = true;
+                    consecutive_failures = 0;
                     write_log("Auth success!");
                     g_icon_state = TrayIconState::Guardian;
                     update_tray_icon();
-                    update_tray_tooltip(L"Connected");
-                    show_notification(L"Campus Guardian", L"Network reconnected!");
+                    update_tray_tooltip(L"已连接 - 守护中");
+                    show_notification(L"Campus Guardian", L"网络重连成功!");
                 } else {
                     retry_count++;
+                    consecutive_failures++;
                     write_log("Auth failed (%d/%d): %s", retry_count, g_config.max_retries, msg.c_str());
+
+                    // Show specific error notification for common issues
+                    std::wstring wmsg = utf8_to_wstring(msg);
+                    if (retry_count == 1) {
+                        show_notification(L"认证失败", (L"错误: " + wmsg).c_str());
+                    }
+
                     if (retry_count < g_config.max_retries) {
-                        std::this_thread::sleep_for(std::chrono::seconds(g_config.retry_interval));
+                        // Exponential backoff: base interval * 2^(min(failures-1, 4))
+                        int backoff = g_config.retry_interval *
+                            (1 << (std::min(consecutive_failures - 1, 4)));
+                        if (backoff > 60) backoff = 60; // cap at 60s
+                        write_log("Waiting %d seconds before retry...", backoff);
+                        for (int i = 0; i < backoff && g_running && g_guardian_enabled; i++) {
+                            std::this_thread::sleep_for(std::chrono::seconds(1));
+                        }
                     }
                 }
             }
 
             if (!success && g_running) {
-                write_log("All auth attempts failed!");
+                write_log("All auth attempts failed, continuing monitoring");
                 g_icon_state = TrayIconState::Disconnected;
                 update_tray_icon();
-                update_tray_tooltip(L"Auth failed!");
-                show_notification(L"Campus Guardian - Auth Failed",
-                    L"Network auth failed after multiple retries. Please check your credentials.");
+                update_tray_tooltip(L"认证失败 - 继续监控中");
+                show_notification(L"Campus Guardian - 认证失败",
+                    L"多次认证失败，守护模式将继续监控网络并重试");
+                // Don't stop guardian - keep monitoring, will retry next cycle
             }
+        } else {
+            // ServerError - network might be unstable
+            write_log("Network check returned server error, retrying next cycle");
         }
 
         if (g_running && g_guardian_enabled) {
@@ -976,21 +1380,18 @@ void toggle_guardian() {
             guardian_loop();
             return 0;
         }, NULL, 0, NULL);
-        update_tray_tooltip(L"Guardian ON");
+        update_tray_tooltip(L"守护模式已开启");
     } else {
-        update_tray_tooltip(L"Guardian OFF");
+        update_tray_tooltip(L"守护模式已关闭");
     }
 }
 
 bool is_autostart_enabled() {
     HKEY hKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER,
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
         0, KEY_READ, &hKey) == ERROR_SUCCESS) {
-        char buf[512] = {0};
-        DWORD len = sizeof(buf);
-        bool exists = RegQueryValueExA(hKey, "CampusAuthGuardian", NULL, NULL,
-            (LPBYTE)buf, &len) == ERROR_SUCCESS;
+        bool exists = RegQueryValueExW(hKey, L"CampusAuthGuardian", NULL, NULL, NULL, NULL) == ERROR_SUCCESS;
         RegCloseKey(hKey);
         return exists;
     }
@@ -999,26 +1400,23 @@ bool is_autostart_enabled() {
 
 void set_autostart(bool enable) {
     HKEY hKey;
-    if (RegOpenKeyExA(HKEY_CURRENT_USER,
-        "Software\\Microsoft\\Windows\\CurrentVersion\\Run",
+    if (RegOpenKeyExW(HKEY_CURRENT_USER,
+        L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",
         0, KEY_WRITE, &hKey) == ERROR_SUCCESS) {
         if (enable) {
-            char exe_path[MAX_PATH];
-            GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-            RegSetValueExA(hKey, "CampusAuthGuardian", 0, REG_SZ,
-                (const BYTE*)exe_path, (DWORD)strlen(exe_path) + 1);
+            wchar_t exe_path[MAX_PATH];
+            GetModuleFileNameW(NULL, exe_path, MAX_PATH);
+            DWORD len = (DWORD)(wcslen(exe_path) + 1) * sizeof(wchar_t);
+            RegSetValueExW(hKey, L"CampusAuthGuardian", 0, REG_SZ,
+                (const BYTE*)exe_path, len);
             write_log("Autostart enabled");
         } else {
-            RegDeleteValueA(hKey, "CampusAuthGuardian");
+            RegDeleteValueW(hKey, L"CampusAuthGuardian");
             write_log("Autostart disabled");
         }
         RegCloseKey(hKey);
         g_autostart_enabled = enable;
     }
-}
-
-void toggle_autostart() {
-    set_autostart(!g_autostart_enabled);
 }
 
 void open_login_web() {
@@ -1028,13 +1426,38 @@ void open_login_web() {
 }
 
 void open_config_file() {
-    char exe_path[MAX_PATH];
-    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-    std::string dir = exe_path;
-    size_t pos = dir.rfind('\\');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    std::string config_path = dir + "\\config.ini";
-    ShellExecuteA(NULL, "open", config_path.c_str(), NULL, NULL, SW_SHOWNORMAL);
+    std::wstring config_path = utf8_to_wstring(get_config_path());
+    ShellExecuteW(nullptr, L"open", config_path.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+}
+
+void reload_config() {
+    std::string cfg_path = get_config_path();
+
+    if (g_config.load(cfg_path)) {
+        write_log("Config reloaded successfully");
+        show_notification(L"Campus Guardian", L"配置已重新加载");
+    } else {
+        write_log("Config reload failed");
+        show_notification(L"Campus Guardian", L"配置加载失败，请检查config.ini");
+    }
+}
+
+// (get_config_path defined above near CONFIG_TEMPLATE)
+
+void switch_operator(const std::wstring& new_op) {
+    g_config.operator_type = new_op;
+    g_config.build_user_account();
+    g_config.save_operator(get_config_path());
+    std::string op_name;
+    if (new_op == L"campus") op_name = "校园网";
+    else if (new_op == L"cmcc") op_name = "中国移动";
+    else if (new_op == L"unicom") op_name = "中国联通";
+    else if (new_op == L"telecom") op_name = "中国电信";
+    else op_name = wstring_to_utf8(new_op);
+    write_log("Operator switched to: %s (account: %s)", op_name.c_str(),
+        wstring_to_utf8(g_config.user_account).c_str());
+    std::wstring msg = L"运营商已切换为" + utf8_to_wstring(op_name);
+    show_notification(L"Campus Guardian", msg.c_str());
 }
 
 bool logout() {
@@ -1054,7 +1477,6 @@ bool logout() {
 
     write_log("Logout IP: %s", ip.c_str());
 
-    // Build logout URL
     std::string url = wstring_to_utf8(g_config.auth_url);
     size_t login_pos = url.find("/login");
     if (login_pos != std::string::npos) {
@@ -1077,6 +1499,7 @@ bool logout() {
         write_log("InternetOpen failed in logout");
         return false;
     }
+    set_http_timeout(hInternet, 5000, 5000, 10000);
 
     HINTERNET hUrl = InternetOpenUrlA(hInternet, url.c_str(), NULL, 0,
         INTERNET_FLAG_NO_CACHE_WRITE | INTERNET_FLAG_NO_UI | INTERNET_FLAG_RELOAD, 0);
@@ -1095,14 +1518,14 @@ bool logout() {
 
     write_log("Logout response: %s", response.c_str());
 
-    // Check for success
-    if (response.find("\"result\":1") != std::string::npos ||
-        response.find("\"result\": 1") != std::string::npos) {
+    AuthResult ar = parse_jsonp_response(response);
+    if (ar.result == 1) {
         write_log("Logout success");
         return true;
     }
 
-    write_log("Logout may have failed");
+    std::string error_msg = get_auth_error_message(ar.result, ar.ret_code, ar.msg);
+    write_log("Logout may have failed: %s", error_msg.c_str());
     return false;
 }
 
@@ -1115,12 +1538,12 @@ void manual_auth() {
     bool success = authenticate(&msg);
 
     if (success) {
-        update_tray_tooltip(L"Auth success");
-        show_notification(L"Campus Auth", L"Login successful!");
+        update_tray_tooltip(L"认证成功");
+        show_notification(L"Campus Auth", L"登录成功!");
     } else {
         std::wstring wmsg = utf8_to_wstring(msg);
-        update_tray_tooltip(L"Auth failed");
-        show_notification(L"Campus Auth", (L"Login failed: " + wmsg).c_str());
+        update_tray_tooltip(L"认证失败");
+        show_notification(L"Campus Auth", (L"登录失败: " + wmsg).c_str());
     }
 
     g_auth_in_progress = false;
@@ -1135,19 +1558,34 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
 
             HMENU hMenu = CreatePopupMenu();
 
-            wchar_t auth_text[64] = L"Manual Auth";
-            if (g_auth_in_progress) {
-                wcscpy(auth_text, L"Authenticating...");
-            }
+            wchar_t auth_text[64] = L"手动认证";
+            if (g_auth_in_progress) wcscpy(auth_text, L"认证中...");
 
             AppendMenuW(hMenu, MF_STRING, ID_TRAY_AUTH, auth_text);
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_OPEN_WEB, L"Open Login Page");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_OPEN_WEB, L"打开登录页");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING | (g_guardian_enabled ? MF_CHECKED : 0), ID_TRAY_GUARDIAN, L"Guardian Mode");
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_LOGOUT, L"Logout");
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_OPEN_CONFIG, L"Open Config");
+
+            // Operator submenu
+            HMENU hOpMenu = CreatePopupMenu();
+            UINT op_flags;
+            op_flags = MF_STRING | (g_config.operator_type == L"campus" ? MF_CHECKED : 0);
+            AppendMenuW(hOpMenu, op_flags, ID_TRAY_OP_CAMPUS, L"校园网");
+            op_flags = MF_STRING | (g_config.operator_type == L"cmcc" ? MF_CHECKED : 0);
+            AppendMenuW(hOpMenu, op_flags, ID_TRAY_OP_CMCC, L"中国移动");
+            op_flags = MF_STRING | (g_config.operator_type == L"unicom" ? MF_CHECKED : 0);
+            AppendMenuW(hOpMenu, op_flags, ID_TRAY_OP_UNICOM, L"中国联通");
+            op_flags = MF_STRING | (g_config.operator_type == L"telecom" ? MF_CHECKED : 0);
+            AppendMenuW(hOpMenu, op_flags, ID_TRAY_OP_TELECOM, L"中国电信");
+            AppendMenuW(hMenu, MF_STRING | MF_POPUP, (UINT_PTR)hOpMenu, L"切换运营商");
+
+            AppendMenuW(hMenu, MF_STRING | (g_guardian_enabled ? MF_CHECKED : 0), ID_TRAY_GUARDIAN, L"守护模式");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_LOGOUT, L"注销登录");
+            AppendMenuW(hMenu, MF_STRING | (g_autostart_enabled ? MF_CHECKED : 0), ID_TRAY_AUTOSTART, L"开机自启");
             AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
-            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"Exit");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_OPEN_CONFIG, L"打开配置文件");
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_RELOAD_CONFIG, L"重新加载配置");
+            AppendMenuW(hMenu, MF_SEPARATOR, 0, NULL);
+            AppendMenuW(hMenu, MF_STRING, ID_TRAY_EXIT, L"退出");
 
             SetForegroundWindow(hwnd);
             TrackPopupMenu(hMenu, TPM_BOTTOMALIGN | TPM_LEFTALIGN, pt.x, pt.y, 0, hwnd, NULL);
@@ -1167,7 +1605,19 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             toggle_guardian();
             break;
         case ID_TRAY_AUTOSTART:
-            toggle_autostart();
+            set_autostart(!g_autostart_enabled);
+            break;
+        case ID_TRAY_OP_CAMPUS:
+            switch_operator(L"campus");
+            break;
+        case ID_TRAY_OP_CMCC:
+            switch_operator(L"cmcc");
+            break;
+        case ID_TRAY_OP_UNICOM:
+            switch_operator(L"unicom");
+            break;
+        case ID_TRAY_OP_TELECOM:
+            switch_operator(L"telecom");
             break;
         case ID_TRAY_OPEN_WEB:
             open_login_web();
@@ -1176,11 +1626,11 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             {
                 std::thread t([]() {
                     if (logout()) {
-                        update_tray_tooltip(L"Logged out");
-                        show_notification(L"Campus Guardian", L"Logout successful!");
+                        update_tray_tooltip(L"已注销");
+                        show_notification(L"Campus Guardian", L"注销成功!");
                     } else {
-                        update_tray_tooltip(L"Logout failed");
-                        show_notification(L"Campus Guardian", L"Logout may have failed. Check log for details.");
+                        update_tray_tooltip(L"注销失败");
+                        show_notification(L"Campus Guardian", L"注销可能失败，请查看日志");
                     }
                 });
                 t.detach();
@@ -1188,6 +1638,9 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
             break;
         case ID_TRAY_OPEN_CONFIG:
             open_config_file();
+            break;
+        case ID_TRAY_RELOAD_CONFIG:
+            reload_config();
             break;
         case ID_TRAY_EXIT:
             g_running = false;
@@ -1244,8 +1697,9 @@ int main_loop() {
         return 1;
     }
 
-    // Check if autostart is enabled
     g_autostart_enabled = is_autostart_enabled();
+
+    ensure_toast_shortcut();
 
     write_log("Application started");
 
@@ -1261,31 +1715,27 @@ int main_loop() {
 
     g_running = false;
     if (g_guardian_thread) CloseHandle(g_guardian_thread);
-    if (g_hInternet) InternetCloseHandle(g_hInternet);
 
     Shell_NotifyIconW(NIM_DELETE, &g_nid);
     write_log("Application exit");
     return 0;
 }
 
-// ============================================================================
-// Application Entry
-// ============================================================================
-static int app_main(bool console_mode) {
+int main(int argc, char* argv[]) {
+    bool console_mode = false;
+    for (int i = 1; i < argc; i++) {
+        if (strcmp(argv[i], "--console") == 0) {
+            console_mode = true;
+        }
+    }
 
-    char exe_path[MAX_PATH];
-    GetModuleFileNameA(NULL, exe_path, MAX_PATH);
-    std::string dir = exe_path;
-    size_t pos = dir.rfind('\\');
-    if (pos != std::string::npos) dir = dir.substr(0, pos);
-    std::string cfg_path = dir + "\\config.ini";
+    std::string cfg_path = get_config_path();
 
-    // Ensure config.ini exists (create from template if needed)
     if (!ensure_config_exists()) {
         if (console_mode) {
             printf("Error: Failed to create config.ini\n");
         } else {
-            MessageBoxW(NULL, L"Failed to create config.ini from template", L"Error", MB_ICONERROR);
+            MessageBoxW(nullptr, L"Failed to create config.ini", L"Error", MB_ICONERROR);
         }
         return 1;
     }
@@ -1311,38 +1761,9 @@ static int app_main(bool console_mode) {
         bool success = authenticate(&msg);
         printf("Auth result: %s\n", success ? "Success" : "Failed");
         if (!msg.empty()) printf("Info: %s\n", msg.c_str());
-        printf("Check log file for details: %s\\campus_auth.log\n", dir.c_str());
+        printf("Check log file for details: %s\\campus_auth.log\n", get_exe_dir().c_str());
         return success ? 0 : 1;
     }
 
     return main_loop();
-}
-
-int main(int argc, char* argv[]) {
-    bool console_mode = false;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--console") == 0) {
-            console_mode = true;
-        }
-    }
-
-    return app_main(console_mode);
-}
-
-int WINAPI WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
-    int argc = 0;
-    LPWSTR* argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    bool console_mode = false;
-
-    if (argv != NULL) {
-        for (int i = 1; i < argc; i++) {
-            if (wcscmp(argv[i], L"--console") == 0) {
-                console_mode = true;
-                break;
-            }
-        }
-        LocalFree(argv);
-    }
-
-    return app_main(console_mode);
 }
