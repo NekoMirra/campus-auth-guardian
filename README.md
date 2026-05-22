@@ -143,6 +143,13 @@ max_retries = 3
 - 配置文件读写使用 `GetPrivateProfileStringW`，正确处理中文
 - Toast 通知通过动态加载 WinRT，兼容 x86/x64/ARM64
 
+## Release
+
+推送 `v*` 标签后，GitHub Actions 会自动构建并发布：
+
+- `CampusAuthGuardian-windows-x64.zip` — x64 原生版本
+- `CampusAuthGuardian-windows-ARM64.zip` — ARM64 原生版本
+
 ## 项目结构
 
 ```
