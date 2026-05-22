@@ -1224,13 +1224,17 @@ void ensure_toast_shortcut() {
                 PROPVARIANT pv;
                 PropVariantInit(&pv);
                 pv.vt = VT_LPWSTR;
-                pv.pwszVal = (wchar_t*)TOAST_AUMID;
-                static const PROPERTYKEY PKEY_AppUserModel_ID = {
-                    {0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5
-                };
-                pPropStore->SetValue(PKEY_AppUserModel_ID, pv);
-                pPropStore->Commit();
-                PropVariantClear(&pv);
+                size_t aumid_len = wcslen(TOAST_AUMID) + 1;
+                pv.pwszVal = (wchar_t*)CoTaskMemAlloc(aumid_len * sizeof(wchar_t));
+                if (pv.pwszVal) {
+                    wcscpy(pv.pwszVal, TOAST_AUMID);
+                    static const PROPERTYKEY PKEY_AppUserModel_ID = {
+                        {0x9F4C2855, 0x9F79, 0x4B39, {0xA8, 0xD0, 0xE1, 0xD4, 0x2D, 0xE1, 0xD5, 0xF3}}, 5
+                    };
+                    pPropStore->SetValue(PKEY_AppUserModel_ID, pv);
+                    pPropStore->Commit();
+                    PropVariantClear(&pv);
+                }
                 pPropStore->Release();
             }
 
@@ -1770,9 +1774,6 @@ int main_loop() {
     ensure_toast_shortcut();
 
     write_log("Application started");
-
-    // Startup info: non-blocking notification that app is running in tray
-    show_notification(L"Campus Guardian", L"程序已启动，请查看系统托盘图标");
 
     if (g_config.guardian_enabled) {
         toggle_guardian();
