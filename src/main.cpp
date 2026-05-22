@@ -1682,7 +1682,75 @@ bool init_tray(HWND hwnd) {
     return Shell_NotifyIconW(NIM_ADD, &g_nid) != FALSE;
 }
 
+// ============================================================================
+// Single instance check + Startup splash window
+// ============================================================================
+
+// Single instance mutex
+HANDLE g_hInstanceMutex = NULL;
+
+bool check_single_instance() {
+    g_hInstanceMutex = CreateMutexW(NULL, TRUE, L"CampusAuthGuardian_Mutex");
+    if (GetLastError() == ERROR_ALREADY_EXISTS) {
+        MessageBoxW(NULL, L"Campus Guardian 已在运行\n请查看系统托盘图标",
+            L"提示", MB_OK | MB_ICONINFORMATION);
+        return false;
+    }
+    return true;
+}
+
+// Startup splash window - shows for 3 seconds then auto-closes
+LRESULT CALLBACK SplashWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    switch (msg) {
+    case WM_CREATE:
+        SetTimer(hwnd, 1, 3000, NULL);
+        return 0;
+    case WM_TIMER:
+        DestroyWindow(hwnd);
+        return 0;
+    case WM_DESTROY:
+        return 0;
+    case WM_PAINT: {
+        PAINTSTRUCT ps;
+        HDC hdc = BeginPaint(hwnd, &ps);
+        RECT rc;
+        GetClientRect(hwnd, &rc);
+        SetBkMode(hdc, TRANSPARENT);
+        DrawTextW(hdc, L"Campus Guardian 已启动\n请查看系统托盘图标", -1, &rc,
+            DT_CENTER | DT_VCENTER | DT_WORDBREAK | DT_NOPREFIX);
+        EndPaint(hwnd, &ps);
+        return 0;
+    }
+    }
+    return DefWindowProc(hwnd, msg, wParam, lParam);
+}
+
+void show_startup_splash() {
+    WNDCLASSW wc = {0};
+    wc.lpfnWndProc = SplashWndProc;
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hInstance = GetModuleHandle(NULL);
+    wc.lpszClassName = L"CampusGuardianSplash";
+    RegisterClassW(&wc);
+
+    int w = 320, h = 90;
+    int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
+    int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
+
+    CreateWindowExW(WS_EX_NOACTIVATE | WS_EX_TOPMOST | WS_EX_TOOLWINDOW,
+        L"CampusGuardianSplash", NULL,
+        WS_POPUP | WS_BORDER | WS_VISIBLE,
+        x, y, w, h,
+        NULL, NULL, GetModuleHandle(NULL), NULL);
+}
+
 int main_loop() {
+    // Single instance check
+    if (!check_single_instance()) return 0;
+
+    // Show startup splash so user knows something happened
+    show_startup_splash();
+
     ShowWindow(GetConsoleWindow(), SW_HIDE);
 
     HWND hwnd = create_window();
