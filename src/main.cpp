@@ -1749,12 +1749,18 @@ int main_loop() {
     return 0;
 }
 
-int main(int argc, char* argv[]) {
+int WinMain(HINSTANCE, HINSTANCE, LPSTR, int) {
+    // Parse command line for --console
     bool console_mode = false;
-    for (int i = 1; i < argc; i++) {
-        if (strcmp(argv[i], "--console") == 0) {
-            console_mode = true;
+    int argc;
+    wchar_t** argv = CommandLineToArgvW(GetCommandLineW(), &argc);
+    if (argv) {
+        for (int i = 1; i < argc; i++) {
+            if (wcscmp(argv[i], L"--console") == 0) {
+                console_mode = true;
+            }
         }
+        LocalFree(argv);
     }
 
     std::string cfg_path = get_config_path();
