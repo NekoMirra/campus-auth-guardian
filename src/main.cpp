@@ -1703,6 +1703,9 @@ int main_loop() {
 
     write_log("Application started");
 
+    // Startup info: non-blocking notification that app is running in tray
+    show_notification(L"Campus Guardian", L"程序已启动，请查看系统托盘图标");
+
     if (g_config.guardian_enabled) {
         toggle_guardian();
     }
