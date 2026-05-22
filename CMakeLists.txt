@@ -24,6 +24,12 @@ if(MSVC)
     target_link_libraries(CampusAuthGuardian wininet ws2_32 comctl32 shell32 iphlpapi ole32 propsys shlwapi)
 else()
     target_link_libraries(CampusAuthGuardian -lwininet -lws2_32 -lcomctl32 -lshell32 -liphlpapi -lole32 -lpropsys -lshlwapi)
+    # Static link MinGW runtime to eliminate DLL dependencies
+    target_link_options(CampusAuthGuardian PRIVATE
+        -static-libgcc
+        -static-libstdc++
+        -Wl,-Bstatic,--whole-archive -lwinpthread -Wl,--no-whole-archive,-Bdynamic
+    )
 endif()
 
 # Create output directory
