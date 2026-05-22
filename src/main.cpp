@@ -1339,7 +1339,7 @@ void guardian_loop() {
                     if (retry_count < g_config.max_retries) {
                         // Exponential backoff: base interval * 2^(min(failures-1, 4))
                         int backoff = g_config.retry_interval *
-                            (1 << (std::min(consecutive_failures - 1, 4)));
+                            (1 << (std::min<int>(consecutive_failures - 1, 4)));
                         if (backoff > 60) backoff = 60; // cap at 60s
                         write_log("Waiting %d seconds before retry...", backoff);
                         for (int i = 0; i < backoff && g_running && g_guardian_enabled; i++) {
