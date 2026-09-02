@@ -83,3 +83,9 @@ Thumbs.db
 
 # Release zips (built by CI)
 *.zip
+
+# Machine-local linker overrides (CI uses default toolchain discovery)
+.cargo/config.toml
+
+# Machine-local build env (VS paths, cargo home)
+scripts/env-*.bat

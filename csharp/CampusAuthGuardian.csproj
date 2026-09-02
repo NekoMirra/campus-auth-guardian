@@ -3,18 +3,20 @@
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
-    <!-- 明确 SDK 版本避开 .NET 10 XAML 编译器兼容问题 -->
     <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
     <RootNamespace>CampusAuthGuardian</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <Platforms>x64;ARM64</Platforms>
-    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
     <UseWinUI>true</UseWinUI>
     <EnablePreviewMsixTooling>false</EnablePreviewMsixTooling>
     <EnableMsixTooling>true</EnableMsixTooling>
     <WindowsPackageType>None</WindowsPackageType>
     <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <!-- 内置 .NET 运行时：目标机器无需安装 .NET -->
+    <SelfContained>true</SelfContained>
+    <RuntimeIdentifier Condition="'$(Platform)'=='x64'">win-x64</RuntimeIdentifier>
+    <RuntimeIdentifier Condition="'$(Platform)'=='ARM64'">win-arm64</RuntimeIdentifier>
     <Nullable>disable</Nullable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -32,7 +34,7 @@
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
   </ItemGroup>
 
-  <!-- Rust FFI -->
+  <!-- Rust FFI：链接内核静态/动态库 -->
   <ItemGroup>
     <LinkerArg Include="/LIBPATH:$(RustLib)" />
   </ItemGroup>
@@ -40,14 +42,18 @@
     <None Include="..\target\$(RustTarget)\release\guardian_core.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\target\$(RustTarget)\release\guardian_core.dll')" />
   </ItemGroup>
 
-  <!-- Rust 构建命令：CI 直接 cargo（官方工具链自动发现）；本机经 env-*.bat 前置路径 -->
+  <!--
+    Rust 构建：
+    - 本机存在 scripts/env-*.bat（机器专属工具链路径，不入库）时经其前置环境
+    - CI（env bat 不存在）直接 cargo（官方工具链自动发现）
+  -->
   <Target Name="BuildRustCore" BeforeTargets="Build"
           Inputs="..\crates\guardian-core\src\**\*.rs;..\crates\guardian-core\Cargo.toml;..\Cargo.toml;..\Cargo.lock"
           Outputs="..\target\$(RustTarget)\release\guardian_core.dll">
-    <Exec Condition="'$(CI)' == 'true'"
-          Command="cargo build --release --target $(RustTarget) -p guardian-core" />
-    <Exec Condition="'$(CI)' != 'true'"
+    <Exec Condition="Exists('$(MSBuildThisFileDirectory)..\scripts\env-$(RustBatchArch).bat')"
           Command="cmd /c &quot;$(MSBuildThisFileDirectory)..\scripts\env-$(RustBatchArch).bat &amp;&amp; cargo build --release --target $(RustTarget) -p guardian-core&quot;" />
+    <Exec Condition="!Exists('$(MSBuildThisFileDirectory)..\scripts\env-$(RustBatchArch).bat')"
+          Command="cargo build --release --target $(RustTarget) -p guardian-core" />
   </Target>
 
 </Project>
