@@ -22,6 +22,8 @@
     <!-- Rust 内核 -->
     <RustTarget Condition="'$(Platform)'=='x64'">x86_64-pc-windows-msvc</RustTarget>
     <RustTarget Condition="'$(Platform)'=='ARM64'">aarch64-pc-windows-msvc</RustTarget>
+    <RustBatchArch Condition="'$(Platform)'=='x64'">x64</RustBatchArch>
+    <RustBatchArch Condition="'$(Platform)'=='ARM64'">arm64</RustBatchArch>
     <RustLib>$(MSBuildThisFileDirectory)..\target\$(RustTarget)\release</RustLib>
   </PropertyGroup>
 
@@ -38,13 +40,14 @@
     <None Include="..\target\$(RustTarget)\release\guardian_core.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\target\$(RustTarget)\release\guardian_core.dll')" />
   </ItemGroup>
 
+  <!-- Rust 构建命令：CI 直接 cargo（官方工具链自动发现）；本机经 env-*.bat 前置路径 -->
   <Target Name="BuildRustCore" BeforeTargets="Build"
           Inputs="..\crates\guardian-core\src\**\*.rs;..\crates\guardian-core\Cargo.toml;..\Cargo.toml;..\Cargo.lock"
           Outputs="..\target\$(RustTarget)\release\guardian_core.dll">
-    <Exec Condition="'$(RustTarget)' == 'x86_64-pc-windows-msvc'"
-          Command="cmd /c &quot;$(MSBuildThisFileDirectory)..\scripts\env-x64.bat &amp;&amp; cargo build --release --target $(RustTarget) -p guardian-core&quot;" />
-    <Exec Condition="'$(RustTarget)' == 'aarch64-pc-windows-msvc'"
-          Command="cmd /c &quot;$(MSBuildThisFileDirectory)..\scripts\env-arm64.bat &amp;&amp; cargo build --release --target $(RustTarget) -p guardian-core&quot;" />
+    <Exec Condition="'$(CI)' == 'true'"
+          Command="cargo build --release --target $(RustTarget) -p guardian-core" />
+    <Exec Condition="'$(CI)' != 'true'"
+          Command="cmd /c &quot;$(MSBuildThisFileDirectory)..\scripts\env-$(RustBatchArch).bat &amp;&amp; cargo build --release --target $(RustTarget) -p guardian-core&quot;" />
   </Target>
 
 </Project>
