@@ -1,0 +1,6 @@
+[target.x86_64-pc-windows-msvc]
+linker = "D:/AI/VisualStudio/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/link.exe"
+rustflags = ["-C", "link-arg=/LIBPATH:D:/AI/VisualStudio/VC/Tools/MSVC/14.50.35717/lib/x64", "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/x64", "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64", "-C", "link-arg=/LIBPATH:D:/AI/VisualStudio/VC/Tools/MSVC/14.50.35717/lib/onecore/x64"]
+[target.aarch64-pc-windows-msvc]
+linker = "D:/AI/VisualStudio/VC/Tools/MSVC/14.50.35717/bin/Hostx64/x64/link.exe"
+rustflags = ["-C", "link-arg=/MACHINE:ARM64", "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/arm64", "-C", "link-arg=/LIBPATH:D:/AI/VisualStudio/VC/Tools/MSVC/14.50.35717/lib/arm64", "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/um/arm64", "-C", "link-arg=/LIBPATH:C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/arm64", "-C", "link-arg=/LIBPATH:D:/AI/VisualStudio/VC/Tools/MSVC/14.50.35717/lib/onecore/arm64"]

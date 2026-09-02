@@ -1,0 +1,15 @@
+@echo off
+:: MSVC ARM64 cross env (Host x64 -> Target arm64)
+set "VCTOOLS=D:\AI\VisualStudio\VC\Tools\MSVC\14.50.35717"
+set "WINKIT=C:\Program Files (x86)\Windows Kits\10"
+set "SDKVER=10.0.26100.0"
+set "PATH=D:\UserJunctions\scoop\apps\llvm\21.1.8\bin;%VCTOOLS%\bin\Hostx64\arm64;%VCTOOLS%\bin\Hostx64\x64;%WINKIT%\bin\%SDKVER%\x64;%PATH%"
+set "INCLUDE=%VCTOOLS%\include;%WINKIT%\Include\%SDKVER%\ucrt;%WINKIT%\Include\%SDKVER%\um;%WINKIT%\Include\%SDKVER%\shared;%WINKIT%\Include\%SDKVER%\winrt"
+set "CC=clang-cl"
+set "CXX=clang-cl"
+set "CFLAGS=--target=aarch64-pc-windows-msvc"
+set "CXXFLAGS=--target=aarch64-pc-windows-msvc"
+set "LIB=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Tools\MSVC\14.44.35207\lib\arm64;%WINKIT%\Lib\%SDKVER%\um\arm64;%WINKIT%\Lib\%SDKVER%\ucrt\arm64;%VCTOOLS%\lib\arm64"
+set "RUSTUP_HOME=D:\UserJunctions\.rustup"
+set "CARGO_HOME=D:\UserJunctions\.cargo"
+set "PATH=D:\UserJunctions\.cargo\bin;%PATH%"

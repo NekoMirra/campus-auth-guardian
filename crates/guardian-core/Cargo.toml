@@ -1,0 +1,23 @@
+[package]
+name = "guardian-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Campus network ePortal authentication core (Rust)"
+
+[lib]
+name = "guardian_core"
+crate-type = ["staticlib", "cdylib", "rlib"]
+[dependencies]
+ureq = { version = "2.10", default-features = false, features = ["tls", "gzip"] }
+crossbeam-channel = "0.5"
+serde_json = "1"
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Networking_WinSock",
+] }
+
+[target.'cfg(windows)'.build-dependencies]
+# 无需 winres；链接系统库通过 rust-link-flags

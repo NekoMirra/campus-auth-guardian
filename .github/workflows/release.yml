@@ -2,10 +2,8 @@ name: Release
 
 on:
   push:
-    branches:
-      - master
-    tags:
-      - "v*"
+    branches: [master, main]
+    tags: ["v*"]
   workflow_dispatch:
 
 permissions:
@@ -13,28 +11,75 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-2022
+    runs-on: windows-latest
     strategy:
       fail-fast: false
       matrix:
         include:
-          - architecture: x64
-          - architecture: ARM64
+          - platform: x64
+            rust-target: x86_64-pc-windows-msvc
+          - platform: ARM64
+            rust-target: aarch64-pc-windows-msvc
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Configure
-        run: cmake -S . -B build-${{ matrix.architecture }} -G "Visual Studio 17 2022" -A ${{ matrix.architecture }}
+      - name: Install Rust ${{ matrix.rust-target }}
+        run: |
+          rustup target add ${{ matrix.rust-target }}
+          rustc --version
 
-      - name: Build
-        run: cmake --build build-${{ matrix.architecture }} --config Release --target CampusAuthGuardian
+      - name: Rust unit tests (x64 only)
+        if: matrix.platform == 'x64'
+        run: cargo test --workspace
 
-      - name: Upload native exe artifact
+      - name: Build Rust core
+        run: cargo build --release --target ${{ matrix.rust-target }} -p guardian-core
+
+      - name: Setup MSBuild
+        uses: microsoft/setup-msbuild@v2
+
+      - name: NuGet restore
+        run: |
+          nuget restore app\packages.config -PackagesDirectory packages -NonInteractive
+
+      - name: Build WinUI3 app (${{ matrix.platform }})
+        run: msbuild app\CampusAuthGuardian.vcxproj /p:Platform=${{ matrix.platform }} /p:Configuration=Release /m /v:m
+
+      - name: Deploy runtime DLLs (SelfContained)
+        run: |
+          $out = "dist\${{ matrix.platform }}\Release"
+          $pkg = Get-ChildItem packages -Directory -Filter "Microsoft.WindowsAppSDK.Runtime.*" | Select-Object -First 1
+          $msixArch = if ("${{ matrix.platform }}" -eq "x64") { "win10-x64" } else { "win10-arm64" }
+          python -c "
+          import zipfile, os
+          z = zipfile.ZipFile(r'$($pkg.FullName)\tools\MSIX\$msixArch\Microsoft.WindowsAppRuntime.1.8.msix')
+          for n in z.namelist():
+              import shutil
+              if n.endswith(('.dll', '.pri')):
+                  base = os.path.basename(n)
+                  with z.open(n) as s, open(os.path.join(r'$out', base), 'wb') as d:
+                      shutil.copyfileobj(s, d)
+          "
+          # Bootstrap
+          $found = Get-ChildItem packages -Recurse -Filter "Microsoft.WindowsAppRuntime.Bootstrap.dll" | Where-Object { $_.FullName -like "*${{ matrix.platform }}*" -or $_.FullName -like "*win-x64*" } | Select-Object -First 1
+          if ($found) { Copy-Item $found.FullName $out }
+
+      - name: Smoke test (x64 only, launch and check process alive)
+        if: matrix.platform == 'x64'
+        run: |
+          $exe = "dist\x64\Release\CampusAuthGuardian.exe"
+          $p = Start-Process $exe -WorkingDirectory "dist\x64\Release" -PassThru
+          Start-Sleep 8
+          if ($p.HasExited) { Write-Host "::warning::App exited early with code $($p.ExitCode)" } else { Write-Host "App running OK"; Stop-Process -Id $p.Id -Force }
+
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: CampusAuthGuardian-${{ matrix.architecture }}
-          path: build-${{ matrix.architecture }}/Release/CampusAuthGuardian.exe
+          name: CampusAuthGuardian-${{ matrix.platform }}
+          path: |
+            dist/${{ matrix.platform }}/Release/CampusAuthGuardian.exe
+            dist/${{ matrix.platform }}/Release/*.dll
+            dist/${{ matrix.platform }}/Release/*.pri
 
   release:
     needs: build
@@ -50,5 +95,5 @@ jobs:
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*/*.exe
+          files: release/**
           generate_release_notes: true

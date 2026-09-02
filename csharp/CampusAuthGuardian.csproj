@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows10.0.26100.0</TargetFramework>
+    <!-- 明确 SDK 版本避开 .NET 10 XAML 编译器兼容问题 -->
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>CampusAuthGuardian</RootNamespace>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <Platforms>x64;ARM64</Platforms>
+    <RuntimeIdentifiers>win-x86;win-x64;win-arm64</RuntimeIdentifiers>
+    <UseWinUI>true</UseWinUI>
+    <EnablePreviewMsixTooling>false</EnablePreviewMsixTooling>
+    <EnableMsixTooling>true</EnableMsixTooling>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <Nullable>disable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <!-- Rust 内核 -->
+    <RustTarget Condition="'$(Platform)'=='x64'">x86_64-pc-windows-msvc</RustTarget>
+    <RustTarget Condition="'$(Platform)'=='ARM64'">aarch64-pc-windows-msvc</RustTarget>
+    <RustLib>$(MSBuildThisFileDirectory)..\target\$(RustTarget)\release</RustLib>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260804001" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.28000.2705" />
+  </ItemGroup>
+
+  <!-- Rust FFI -->
+  <ItemGroup>
+    <LinkerArg Include="/LIBPATH:$(RustLib)" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="..\target\$(RustTarget)\release\guardian_core.dll" CopyToOutputDirectory="PreserveNewest" Condition="Exists('..\target\$(RustTarget)\release\guardian_core.dll')" />
+  </ItemGroup>
+
+  <Target Name="BuildRustCore" BeforeTargets="Build"
+          Inputs="..\crates\guardian-core\src\**\*.rs;..\crates\guardian-core\Cargo.toml;..\Cargo.toml;..\Cargo.lock"
+          Outputs="..\target\$(RustTarget)\release\guardian_core.dll">
+    <Exec Condition="'$(RustTarget)' == 'x86_64-pc-windows-msvc'"
+          Command="cmd /c &quot;$(MSBuildThisFileDirectory)..\scripts\env-x64.bat &amp;&amp; cargo build --release --target $(RustTarget) -p guardian-core&quot;" />
+    <Exec Condition="'$(RustTarget)' == 'aarch64-pc-windows-msvc'"
+          Command="cmd /c &quot;$(MSBuildThisFileDirectory)..\scripts\env-arm64.bat &amp;&amp; cargo build --release --target $(RustTarget) -p guardian-core&quot;" />
+  </Target>
+
+</Project>
