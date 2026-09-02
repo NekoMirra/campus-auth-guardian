@@ -18,10 +18,17 @@ jobs:
         include:
           - platform: x64
             rust-target: x86_64-pc-windows-msvc
+            msbuild-platform: x64
           - platform: ARM64
             rust-target: aarch64-pc-windows-msvc
+            msbuild-platform: ARM64
     steps:
       - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 10.0.x
 
       - name: Install Rust ${{ matrix.rust-target }}
         run: |
@@ -38,48 +45,40 @@ jobs:
       - name: Setup MSBuild
         uses: microsoft/setup-msbuild@v2
 
-      - name: NuGet restore
-        run: |
-          nuget restore app\packages.config -PackagesDirectory packages -NonInteractive
-
       - name: Build WinUI3 app (${{ matrix.platform }})
-        run: msbuild app\CampusAuthGuardian.vcxproj /p:Platform=${{ matrix.platform }} /p:Configuration=Release /m /v:m
+        run: msbuild csharp\CampusAuthGuardian.csproj /p:Configuration=Release /p:Platform=${{ matrix.msbuild-platform }} /restore /m /v:m /bl
 
-      - name: Deploy runtime DLLs (SelfContained)
-        run: |
-          $out = "dist\${{ matrix.platform }}\Release"
-          $pkg = Get-ChildItem packages -Directory -Filter "Microsoft.WindowsAppSDK.Runtime.*" | Select-Object -First 1
-          $msixArch = if ("${{ matrix.platform }}" -eq "x64") { "win10-x64" } else { "win10-arm64" }
-          python -c "
-          import zipfile, os
-          z = zipfile.ZipFile(r'$($pkg.FullName)\tools\MSIX\$msixArch\Microsoft.WindowsAppRuntime.1.8.msix')
-          for n in z.namelist():
-              import shutil
-              if n.endswith(('.dll', '.pri')):
-                  base = os.path.basename(n)
-                  with z.open(n) as s, open(os.path.join(r'$out', base), 'wb') as d:
-                      shutil.copyfileobj(s, d)
-          "
-          # Bootstrap
-          $found = Get-ChildItem packages -Recurse -Filter "Microsoft.WindowsAppRuntime.Bootstrap.dll" | Where-Object { $_.FullName -like "*${{ matrix.platform }}*" -or $_.FullName -like "*win-x64*" } | Select-Object -First 1
-          if ($found) { Copy-Item $found.FullName $out }
-
-      - name: Smoke test (x64 only, launch and check process alive)
+      - name: Smoke test (x64 only, launch and verify alive)
         if: matrix.platform == 'x64'
         run: |
-          $exe = "dist\x64\Release\CampusAuthGuardian.exe"
-          $p = Start-Process $exe -WorkingDirectory "dist\x64\Release" -PassThru
-          Start-Sleep 8
-          if ($p.HasExited) { Write-Host "::warning::App exited early with code $($p.ExitCode)" } else { Write-Host "App running OK"; Stop-Process -Id $p.Id -Force }
+          $exe = "csharp\bin\x64\Release\net10.0-windows10.0.26100.0\CampusAuthGuardian.exe"
+          $p = Start-Process $exe -WorkingDirectory "csharp\bin\x64\Release\net10.0-windows10.0.26100.0" -PassThru
+          Start-Sleep 10
+          if ($p.HasExited) { Write-Host "::warning::App exited early" } else { Write-Host "App running OK"; Stop-Process -Id $p.Id -Force }
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: CampusAuthGuardian-${{ matrix.platform }}
           path: |
-            dist/${{ matrix.platform }}/Release/CampusAuthGuardian.exe
-            dist/${{ matrix.platform }}/Release/*.dll
-            dist/${{ matrix.platform }}/Release/*.pri
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/CampusAuthGuardian.exe
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/CampusAuthGuardian.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/guardian_core.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/*.pri
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/Microsoft.WindowsAppRuntime.*
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/Microsoft.UI.*
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/Microsoft.Internal.*
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/CoreMessagingXP.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/dcompi.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/dwmcorei.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/wuceffectsi.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/marshal.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/DWriteCore.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/WinUIEdit.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/MRM.dll
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/DirectManipulation*
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/zh-CN/*
+            csharp/bin/${{ matrix.platform }}/Release/net10.0-windows10.0.26100.0/en-us/*
 
   release:
     needs: build
@@ -92,8 +91,15 @@ jobs:
           path: release
           merge-multiple: true
 
+      - name: Zip per-platform
+        run: |
+          cd release
+          zip -r CampusAuthGuardian-windows-x64.zip CampusAuthGuardian-x64 -i '*'
+          zip -r CampusAuthGuardian-windows-ARM64.zip CampusAuthGuardian-ARM64 -i '*'
+        shell: bash
+
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: release/**
+          files: release/*.zip
           generate_release_notes: true
