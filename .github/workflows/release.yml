@@ -92,11 +92,11 @@ jobs:
           merge-multiple: true
 
       - name: Zip per-platform
+        shell: pwsh
         run: |
-          cd release
-          zip -r CampusAuthGuardian-windows-x64.zip CampusAuthGuardian-x64 -i '*'
-          zip -r CampusAuthGuardian-windows-ARM64.zip CampusAuthGuardian-ARM64 -i '*'
-        shell: bash
+          Compress-Archive -Path "release/CampusAuthGuardian-x64/*" -DestinationPath "CampusAuthGuardian-windows-x64.zip" -Force
+          Compress-Archive -Path "release/CampusAuthGuardian-ARM64/*" -DestinationPath "CampusAuthGuardian-windows-ARM64.zip" -Force
+          Get-Item *.zip | Select-Object Name, Length
 
       - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
