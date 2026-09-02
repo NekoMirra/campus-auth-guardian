@@ -80,3 +80,6 @@ winrt/
 Thumbs.db
 
 # Added by cargo
+
+# Release zips (built by CI)
+*.zip
