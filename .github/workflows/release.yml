@@ -91,11 +91,30 @@ jobs:
           path: release
           merge-multiple: true
 
+      - name: Inspect downloaded layout
+        shell: bash
+        run: |
+          echo "=== release tree ==="
+          find release -maxdepth 3 | head -40
+
       - name: Zip per-platform
         shell: pwsh
         run: |
-          Compress-Archive -Path "release/CampusAuthGuardian-x64/*" -DestinationPath "CampusAuthGuardian-windows-x64.zip" -Force
-          Compress-Archive -Path "release/CampusAuthGuardian-ARM64/*" -DestinationPath "CampusAuthGuardian-windows-ARM64.zip" -Force
+          # 找到各平台目录（download-artifact 结构可能是 release/<name>/ 或扁平）
+          $x64 = Get-ChildItem release -Recurse -Directory | Where-Object Name -eq "CampusAuthGuardian-x64" | Select-Object -First 1
+          $arm = Get-ChildItem release -Recurse -Directory | Where-Object Name -eq "CampusAuthGuardian-ARM64" | Select-Object -First 1
+          if (-not $x64 -or -not $arm) {
+            # 扁平结构：按文件特征分组
+            New-Item -ItemType Directory -Path "stage-x64","stage-ARM64" -Force | Out-Null
+            Get-ChildItem release -Recurse -File | ForEach-Object {
+              if ($_.FullName -match "[\\/]CampusAuthGuardian-x64[\\/]" -or $_.Name -match "x64") { Copy-Item $_.FullName "stage-x64/" }
+              elseif ($_.FullName -match "[\\/]CampusAuthGuardian-ARM64[\\/]" -or $_.Name -match "arm64|ARM64") { Copy-Item $_.FullName "stage-ARM64/" }
+            }
+            $x64 = Get-Item "stage-x64"
+            $arm = Get-Item "stage-ARM64"
+          }
+          Compress-Archive -Path "$($x64.FullName)/*" -DestinationPath "CampusAuthGuardian-windows-x64.zip" -Force
+          Compress-Archive -Path "$($arm.FullName)/*" -DestinationPath "CampusAuthGuardian-windows-ARM64.zip" -Force
           Get-Item *.zip | Select-Object Name, Length
 
       - name: Publish GitHub release
