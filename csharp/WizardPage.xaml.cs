@@ -114,7 +114,7 @@ namespace CampusAuthGuardian
                 + $"\"auth_url\":\"{Esc(WizAuthUrl.Text.Trim())}\","
                 + $"\"student_id\":\"{Esc(WizStudentId.Text.Trim())}\","
                 + $"\"password\":\"{Esc(WizPassword.Password)}\","
-                + $"\"operator\":\"{((WizOperator.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "campus")}\","
+                + $"\"operator\":\"{((WizOperator.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "campus")}\""
                 + "}";
             // merge: 保留其他字段
             Native.ConfigApply(json);

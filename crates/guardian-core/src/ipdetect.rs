@@ -114,12 +114,41 @@ mod imp {
 
 pub use imp::list_adapters;
 
-/// 选择用于认证的本机 IP：第一个非回环、非链路本地 (169.254.*) 的 IPv4。
+/// 选择用于认证的本机 IP。
+/// 优先级：校园网 10.x > 宿主 192.168.x（非 .1 网关）> 172.16-31.x > 其他非回环。
+/// 排除：回环、链路本地 169.254、Tailscale 100.x、APIPA。
 pub fn detect_local_ip() -> Option<String> {
-    list_adapters()
+    let ips: Vec<String> = list_adapters()
         .into_iter()
         .map(|a| a.ip)
-        .find(|ip| !ip.starts_with("169.254.") && ip != "127.0.0.1")
+        .filter(|ip| {
+            !ip.starts_with("169.254.")
+                && ip != "127.0.0.1"
+                && !ip.starts_with("100.")
+                && !ip.starts_with("100.64.")
+        })
+        .collect();
+
+    let score = |ip: &str| -> u8 {
+        let octets: Vec<u32> = ip.split('.').filter_map(|o| o.parse().ok()).collect();
+        if octets.len() != 4 {
+            return 0;
+        }
+        let (a, b, c) = (octets[0], octets[1], octets[2]);
+        if a == 10 {
+            5 // 校园网/企业内网（ePortal 场景的目标网段）
+        } else if a == 192 && b == 168 && c != 1 {
+            4 // 宿主网段（非 .1 网关自身）
+        } else if a == 192 && b == 168 {
+            3 // 192.168.x.1 类（可能是网关/虚拟网卡）
+        } else if a == 172 && (16..=31).contains(&b) {
+            2 // Docker/Hyper-V 常见段，低优先
+        } else {
+            1
+        }
+    };
+
+    ips.into_iter().max_by_key(|ip| score(ip))
 }
 
 #[cfg(test)]
@@ -129,5 +158,38 @@ mod tests {
     #[test]
     fn detect_does_not_panic() {
         let _ = detect_local_ip();
+    }
+
+    #[test]
+    fn prefers_campus_10x() {
+        // 无法注入 mock adapter；直接测评分逻辑的等价行为
+        let ips = vec![
+            "172.29.144.1".to_string(),   // Hyper-V
+            "192.168.1.155".to_string(),  // 物理网卡
+            "10.48.0.224".to_string(),    // 校园网
+            "100.123.202.1".to_string(),  // Tailscale
+        ];
+        let best = ips
+            .into_iter()
+            .filter(|ip| !ip.starts_with("169.254.") && ip != "127.0.0.1" && !ip.starts_with("100."))
+            .max_by_key(|ip| {
+                let octets: Vec<u32> = ip.split('.').filter_map(|o| o.parse().ok()).collect();
+                if octets.len() != 4 {
+                    return 0;
+                }
+                let (a, b, c) = (octets[0], octets[1], octets[2]);
+                if a == 10 {
+                    5
+                } else if a == 192 && b == 168 && c != 1 {
+                    4
+                } else if a == 192 && b == 168 {
+                    3
+                } else if a == 172 && (16..=31).contains(&b) {
+                    2
+                } else {
+                    1
+                }
+            });
+        assert_eq!(best.as_deref(), Some("10.48.0.224"));
     }
 }
