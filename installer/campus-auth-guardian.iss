@@ -16,7 +16,7 @@ AppVerName={#MyAppName} v{#MyAppVersion}
 DefaultDirName={autopf}\{#MyAppNameEn}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
-OutputDir=installer
+OutputDir=.
 OutputBaseFilename=CampusAuthGuardian-setup-x64-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes
@@ -25,14 +25,14 @@ PrivilegesRequired=lowest
 PrivilegesRequiredOverridesAllowed=dialog
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
-SetupIconFile=csharp\app.ico
+SetupIconFile=..\csharp\app.ico
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
 
 [Files]
 ; 全部 SelfContained 产物（exe/dll/pri/资源目录）
-Source: "publish-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "..\publish-x64\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"
