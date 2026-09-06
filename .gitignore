@@ -92,4 +92,5 @@ scripts/env-*.bat
 
 # Local installer staging
 publish-x64/
+publish-arm64/
 installer/*.exe
