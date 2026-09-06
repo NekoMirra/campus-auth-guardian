@@ -89,3 +89,7 @@ Thumbs.db
 
 # Machine-local build env (VS paths, cargo home)
 scripts/env-*.bat
+
+# Local installer staging
+publish-x64/
+installer/*.exe
