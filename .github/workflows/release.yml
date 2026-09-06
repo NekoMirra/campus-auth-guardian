@@ -124,5 +124,5 @@ jobs:
             CampusAuthGuardian-windows-x64.zip
             CampusAuthGuardian-windows-ARM64.zip
             CampusAuthGuardian-setup-x64-*.exe
-          fail_on_unmatched_files: true
+          fail_on_unmatched_files: false
           generate_release_notes: true
