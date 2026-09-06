@@ -10,11 +10,12 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <!-- 自绘标题栏拖拽区 -->
-        <Grid x:Name="AppTitleBar" Height="36" Grid.Row="0" Background="Transparent">
-            <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center" Spacing="8">
-                <FontIcon Glyph="&#xE701;" FontSize="14"/>
-                <TextBlock Text="校园网认证守护" FontSize="12" VerticalAlignment="Center"/>
+        <!-- 自绘标题栏 -->
+        <Grid x:Name="AppTitleBar" Height="40" Grid.Row="0" Background="Transparent">
+            <StackPanel Orientation="Horizontal" Margin="16,0,0,0" VerticalAlignment="Center" Spacing="10">
+                <FontIcon Glyph="&#xE701;" FontSize="16" Foreground="{ThemeResource AccentFillColorDefaultBrush}"/>
+                <TextBlock Text="校园网认证守护" FontSize="13" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                <TextBlock Text="v2.2" FontSize="11" Opacity="0.5" VerticalAlignment="Center" Margin="4,1,0,0"/>
             </StackPanel>
         </Grid>
 
@@ -22,11 +23,12 @@
                         PaneDisplayMode="Left"
                         IsBackButtonVisible="Collapsed"
                         IsSettingsVisible="False"
+                        OpenPaneLength="200"
                         SelectionChanged="Nav_SelectionChanged">
             <NavigationView.MenuItems>
-                <NavigationViewItem Content="状态" Tag="status">
+                <NavigationViewItem Content="状态" Tag="status" ToolTipService.ToolTip="网络与认证状态总览">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE701;"/>
+                        <FontIcon Glyph="&#xE9D9;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
                 <NavigationViewItem Content="设置" Tag="settings">
@@ -36,110 +38,159 @@
                 </NavigationViewItem>
                 <NavigationViewItem Content="日志" Tag="logs">
                     <NavigationViewItem.Icon>
-                        <FontIcon Glyph="&#xE8A5;"/>
+                        <FontIcon Glyph="&#xE7C3;"/>
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+                <NavigationViewItemSeparator/>
+                <NavigationViewItem Content="关于" Tag="about">
+                    <NavigationViewItem.Icon>
+                        <FontIcon Glyph="&#xE946;"/>
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
             </NavigationView.MenuItems>
 
             <Grid>
-                <!-- 状态页 -->
-                <ScrollViewer x:Name="StatusPage" Padding="28,20" Visibility="Visible">
-                    <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
-                        <TextBlock Text="网络状态" FontSize="26" FontWeight="SemiBold"/>
+                <!-- ===== 状态页 ===== -->
+                <ScrollViewer x:Name="StatusPage" Padding="32,24" Visibility="Visible">
+                    <StackPanel Spacing="20" MaxWidth="820" HorizontalAlignment="Left">
 
-                        <Grid ColumnSpacing="12">
+                        <!-- 全局提示条 -->
+                        <InfoBar x:Name="StatusInfoBar" IsOpen="False" Severity="Informational"
+                                 CloseButtonClick="StatusInfoBar_Close"/>
+
+                        <StackPanel Spacing="4">
+                            <TextBlock Text="网络状态" FontSize="28" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="LastUpdateTime" Text="—" FontSize="12" Opacity="0.5"/>
+                        </StackPanel>
+
+                        <!-- 双状态卡 -->
+                        <Grid ColumnSpacing="14">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
 
-                            <!-- Internet 连通性卡 -->
                             <Border Grid.Column="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                    CornerRadius="8" Padding="18"
+                                    CornerRadius="12" Padding="20,18"
                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                                <StackPanel Spacing="8">
-                                    <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <Ellipse x:Name="NetLight" Width="12" Height="12" Fill="Gray" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Internet 连通性" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <TextBlock x:Name="NetStatusText" Text="等待检测…" FontSize="17"/>
-                                    <TextBlock x:Name="NetDetailText" Text="检测目标：config.ini 中的 check_url" Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                                <StackPanel Spacing="10">
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Border Width="34" Height="34" CornerRadius="8"
+                                                    Background="{ThemeResource AccentFillColorDefaultBrush}"
+                                                    VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE701;" FontSize="16" Foreground="White"/>
+                                            </Border>
+                                            <TextBlock Text="Internet" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Ellipse x:Name="NetLight" Width="12" Height="12" Fill="Gray"
+                                                 HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <TextBlock x:Name="NetStatusText" Text="等待检测…" FontSize="16" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="NetDetailText" Text="检测目标：设置中的连通性检测地址"
+                                               Opacity="0.55" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
 
-                            <!-- Portal 认证卡 -->
                             <Border Grid.Column="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                    CornerRadius="8" Padding="18"
+                                    CornerRadius="12" Padding="20,18"
                                     BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                                <StackPanel Spacing="8">
-                                    <StackPanel Orientation="Horizontal" Spacing="10">
-                                        <Ellipse x:Name="AuthLight" Width="12" Height="12" Fill="Gray" VerticalAlignment="Center"/>
-                                        <TextBlock Text="Portal 认证" FontSize="15" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                    <TextBlock x:Name="AuthStatusText" Text="未知" FontSize="17"/>
-                                    <TextBlock x:Name="AuthDetailText" Text="ePortal 会话状态" Opacity="0.6" FontSize="12" TextWrapping="Wrap"/>
+                                <StackPanel Spacing="10">
+                                    <Grid>
+                                        <StackPanel Orientation="Horizontal" Spacing="10">
+                                            <Border Width="34" Height="34" CornerRadius="8"
+                                                    Background="{ThemeResource SystemFillColorSuccessBrush}"
+                                                    VerticalAlignment="Center">
+                                                <FontIcon Glyph="&#xE8F1;" FontSize="16" Foreground="White"/>
+                                            </Border>
+                                            <TextBlock Text="Portal 认证" FontSize="16" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                        </StackPanel>
+                                        <Ellipse x:Name="AuthLight" Width="12" Height="12" Fill="Gray"
+                                                 HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                    <TextBlock x:Name="AuthStatusText" Text="未知" FontSize="16" FontWeight="SemiBold"/>
+                                    <TextBlock x:Name="AuthDetailText" Text="ePortal 会话状态"
+                                               Opacity="0.55" FontSize="12" TextWrapping="Wrap"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
 
-                        <!-- 详情行（守护/最近事件） -->
+                        <!-- 综合状态条 -->
                         <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                                CornerRadius="8" Padding="20"
+                                CornerRadius="12" Padding="20,16"
                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
-                            <StackPanel Spacing="10">
+                            <StackPanel Spacing="8">
                                 <StackPanel Orientation="Horizontal" Spacing="12">
-                                    <Ellipse x:Name="StatusLight" Width="12" Height="12" Fill="Gray" VerticalAlignment="Center"/>
-                                    <TextBlock x:Name="StatusText" Text="检测中…" FontSize="18" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                    <FontIcon x:Name="StatusIcon" Glyph="&#xE770;" FontSize="20" VerticalAlignment="Center"/>
+                                    <FontIcon x:Name="StatusIcon" Glyph="&#xE770;" FontSize="22"
+                                              Foreground="{ThemeResource AccentFillColorDefaultBrush}"/>
+                                    <TextBlock x:Name="StatusText" Text="检测中…" FontSize="17" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="StatusLight" Text="●" FontSize="18" VerticalAlignment="Center" Foreground="Gray"/>
                                 </StackPanel>
-                                <TextBlock x:Name="DetailText" Text="守护模式未启动" Opacity="0.7" TextWrapping="Wrap"/>
+                                <TextBlock x:Name="DetailText" Text="守护模式未启动" Opacity="0.65" TextWrapping="Wrap" FontSize="13"/>
                             </StackPanel>
                         </Border>
 
-                        <StackPanel Orientation="Horizontal" Spacing="12">
-                            <Button x:Name="AuthNowBtn" Click="AuthNow_Click" Style="{ThemeResource AccentButtonStyle}" Padding="24,8">
+                        <!-- 操作区 -->
+                        <Grid ColumnSpacing="10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <Button x:Name="AuthNowBtn" Grid.Column="0" Click="AuthNow_Click"
+                                    Style="{ThemeResource AccentButtonStyle}" Padding="26,9">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE768;" FontSize="14"/>
-                                    <TextBlock Text="立即认证"/>
+                                    <FontIcon Glyph="&#xE768;" FontSize="15"/>
+                                    <TextBlock Text="立即认证" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Button>
-                            <ToggleSwitch x:Name="GuardianToggle" OffContent="守护模式" OnContent="守护模式" Toggled="Guardian_Toggled"/>
-                            <Button Click="OpenLoginPage_Click" Padding="20,8">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE774;" FontSize="14"/>
-                                    <TextBlock Text="打开登录页"/>
-                                </StackPanel>
-                            </Button>
-                            <Button Click="Logout_Click" Padding="20,8">
-                                <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xF3B1;" FontSize="14"/>
-                                    <TextBlock Text="注销登录"/>
-                                </StackPanel>
-                            </Button>
-                        </StackPanel>
+                            <ToggleSwitch x:Name="GuardianToggle" Grid.Column="2" Toggled="Guardian_Toggled"
+                                          OnContent="守护开启" OffContent="守护关闭" Margin="0,0,8,0"/>
+                            <Button Grid.Column="3" Click="OpenLoginPage_Click" Padding="18,8" Content="登录页"/>
+                            <Button Grid.Column="4" Click="Logout_Click" Padding="18,8" Content="注销"/>
+                        </Grid>
 
-                        <TextBlock Text="运营商" FontSize="18" FontWeight="SemiBold" Margin="0,10,0,0"/>
-                        <ComboBox x:Name="OperatorBox" SelectedIndex="0" MinWidth="240" SelectionChanged="Operator_SelectionChanged">
-                            <ComboBoxItem Content="校园网" Tag="campus"/>
-                            <ComboBoxItem Content="中国移动" Tag="cmcc"/>
-                            <ComboBoxItem Content="中国联通" Tag="unicom"/>
-                            <ComboBoxItem Content="中国电信" Tag="telecom"/>
-                        </ComboBox>
+                        <!-- 运营商 -->
+                        <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                                CornerRadius="12" Padding="20,14"
+                                BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Spacing="2">
+                                    <TextBlock Text="运营商" FontSize="14" FontWeight="SemiBold"/>
+                                    <TextBlock Text="认证账号的运营商后缀，决定 @xxx 部分" FontSize="11.5" Opacity="0.55"/>
+                                </StackPanel>
+                                <ComboBox x:Name="OperatorBox" Grid.Column="1" SelectedIndex="0" MinWidth="180"
+                                          SelectionChanged="Operator_SelectionChanged">
+                                    <ComboBoxItem Content="校园网" Tag="campus"/>
+                                    <ComboBoxItem Content="中国移动" Tag="cmcc"/>
+                                    <ComboBoxItem Content="中国联通" Tag="unicom"/>
+                                    <ComboBoxItem Content="中国电信" Tag="telecom"/>
+                                </ComboBox>
+                            </Grid>
+                        </Border>
                     </StackPanel>
                 </ScrollViewer>
 
-                <!-- 设置页 -->
-                <ScrollViewer x:Name="SettingsPage" Padding="28,20" Visibility="Collapsed">
-                    <StackPanel Spacing="12" MaxWidth="760" HorizontalAlignment="Left">
-                        <TextBlock Text="设置" FontSize="26" FontWeight="SemiBold"/>
+                <!-- ===== 设置页 ===== -->
+                <ScrollViewer x:Name="SettingsPage" Padding="32,24" Visibility="Collapsed">
+                    <StackPanel Spacing="14" MaxWidth="760" HorizontalAlignment="Left">
+                        <TextBlock Text="设置" FontSize="28" FontWeight="SemiBold"/>
 
                         <InfoBar x:Name="InfoBar" IsOpen="False" Severity="Success" CloseButtonClick="InfoBar_Close"/>
 
-                        <TextBlock Text="服务器" Opacity="0.6" FontWeight="SemiBold" Margin="0,6,0,0"/>
-                        <TextBox x:Name="AuthUrlBox" Header="认证服务器地址" PlaceholderText="http://10.10.102.50:801/eportal/portal/login"/>
-                        <TextBox x:Name="CheckUrlBox" Header="连通性检测地址" PlaceholderText="http://www.baidu.com"/>
+                        <TextBlock Text="服务器" Opacity="0.6" FontWeight="SemiBold" Margin="0,4,0,0"/>
+                        <TextBox x:Name="AuthUrlBox" Header="认证 API 地址"
+                                 PlaceholderText="http://10.10.102.50:801/eportal/portal/login"/>
+                        <TextBox x:Name="CheckUrlBox" Header="连通性检测地址"
+                                 PlaceholderText="http://www.baidu.com"/>
 
-                        <TextBlock Text="账号" Opacity="0.6" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                        <TextBlock Text="账号" Opacity="0.6" FontWeight="SemiBold" Margin="0,8,0,0"/>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -148,52 +199,57 @@
                             <TextBox x:Name="StudentIdBox" Grid.Column="0" Header="学号"/>
                             <PasswordBox x:Name="PasswordBox" Grid.Column="1" Header="密码"/>
                         </Grid>
-                        <TextBox x:Name="FixedIpBox" Header="固定 IP（留空自动检测）" PlaceholderText="10.59.29.29"/>
+                        <TextBox x:Name="FixedIpBox" Header="固定 IP（可选；NAT 环境填校园网侧 IP）"
+                                 PlaceholderText="10.59.29.29"/>
 
-                        <TextBlock Text="守护策略" Opacity="0.6" FontWeight="SemiBold" Margin="0,10,0,0"/>
+                        <TextBlock Text="守护策略" Opacity="0.6" FontWeight="SemiBold" Margin="0,8,0,0"/>
                         <Grid ColumnSpacing="12">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <NumberBox x:Name="CheckIntervalBox" Grid.Column="0" Header="检测间隔（秒）" Minimum="5" Maximum="3600" Value="30"/>
-                            <NumberBox x:Name="RetryIntervalBox" Grid.Column="1" Header="重试间隔（秒）" Minimum="1" Maximum="3600" Value="10"/>
-                            <NumberBox x:Name="MaxRetriesBox" Grid.Column="2" Header="最大重试" Minimum="1" Maximum="100" Value="3"/>
+                            <NumberBox x:Name="CheckIntervalBox" Grid.Column="0" Header="检测间隔（秒）" Minimum="5" Maximum="3600" Value="30" SpinButtonPlacementMode="Compact"/>
+                            <NumberBox x:Name="RetryIntervalBox" Grid.Column="1" Header="重试间隔（秒）" Minimum="1" Maximum="3600" Value="10" SpinButtonPlacementMode="Compact"/>
+                            <NumberBox x:Name="MaxRetriesBox" Grid.Column="2" Header="最大重试" Minimum="1" Maximum="100" Value="3" SpinButtonPlacementMode="Compact"/>
                         </Grid>
 
-                        <ToggleSwitch x:Name="AutostartToggle" OffContent="开机自启" OnContent="开机自启" Toggled="Autostart_Toggled" Margin="0,6,0,0"/>
+                        <ToggleSwitch x:Name="AutostartToggle" OffContent="开机自启" OnContent="开机自启"
+                                      Toggled="Autostart_Toggled" Margin="0,6,0,0"/>
 
-                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,10,0,0">
-                            <Button Click="Save_Click" Style="{ThemeResource AccentButtonStyle}" Padding="24,8">
+                        <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,12,0,0">
+                            <Button Click="Save_Click" Style="{ThemeResource AccentButtonStyle}" Padding="26,9">
                                 <StackPanel Orientation="Horizontal" Spacing="8">
-                                    <FontIcon Glyph="&#xE74E;" FontSize="14"/>
-                                    <TextBlock Text="保存设置"/>
+                                    <FontIcon Glyph="&#xE74E;" FontSize="15"/>
+                                    <TextBlock Text="保存设置" FontWeight="SemiBold"/>
                                 </StackPanel>
                             </Button>
-                            <Button Click="OpenConfig_Click" Padding="20,8" Content="打开配置文件"/>
+                            <Button Click="OpenConfig_Click" Padding="18,8" Content="打开配置文件"/>
                         </StackPanel>
                     </StackPanel>
                 </ScrollViewer>
 
-                <!-- 日志页 -->
-                <Grid x:Name="LogsPage" Padding="28,20" Visibility="Collapsed">
+                <!-- ===== 日志页 ===== -->
+                <Grid x:Name="LogsPage" Padding="32,24" Visibility="Collapsed">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="*"/>
                     </Grid.RowDefinitions>
                     <StackPanel Orientation="Horizontal" Spacing="12" Grid.Row="0" Margin="0,0,0,12">
-                        <TextBlock Text="运行日志" FontSize="26" FontWeight="SemiBold"/>
-                        <Button Click="RefreshLogs_Click" VerticalAlignment="Center" Content="刷新"/>
+                        <TextBlock Text="运行日志" FontSize="28" FontWeight="SemiBold"/>
+                        <Button Click="RefreshLogs_Click" VerticalAlignment="Center" Content="刷新" Padding="16,6"/>
+                        <CheckBox x:Name="AutoScrollCheck" Content="自动滚动" IsChecked="True" VerticalAlignment="Center" MinWidth="0"/>
                     </StackPanel>
                     <Border Grid.Row="1" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
-                            CornerRadius="8" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                            CornerRadius="12" BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
                         <ScrollViewer x:Name="LogsScroll" VerticalScrollBarVisibility="Auto">
-                            <TextBlock x:Name="LogsText" FontFamily="Consolas" FontSize="12.5"
-                                       TextWrapping="Wrap" IsTextSelectionEnabled="True" Padding="14" LineHeight="20"/>
+                            <TextBlock x:Name="LogsText" FontFamily="Cascadia Mono, Consolas" FontSize="12.5"
+                                       TextWrapping="Wrap" IsTextSelectionEnabled="True" Padding="16" LineHeight="21"/>
                         </ScrollViewer>
                     </Border>
                 </Grid>
+                <!-- 关于页 -->
+                <Frame x:Name="AboutFrame" Visibility="Collapsed"/>
 
             </Grid>
         </NavigationView>

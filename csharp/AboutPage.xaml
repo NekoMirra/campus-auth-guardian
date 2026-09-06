@@ -1,0 +1,107 @@
+<Page
+    x:Class="CampusAuthGuardian.AboutPage"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <ScrollViewer Padding="32,24">
+        <StackPanel Spacing="18" MaxWidth="760" HorizontalAlignment="Left">
+
+            <!-- 应用标识 -->
+            <StackPanel Orientation="Horizontal" Spacing="14">
+                <Border Width="64" Height="64" CornerRadius="14"
+                        Background="{ThemeResource AccentFillColorDefaultBrush}">
+                    <FontIcon Glyph="&#xE701;" FontSize="30" Foreground="White"/>
+                </Border>
+                <StackPanel VerticalAlignment="Center" Spacing="2">
+                    <TextBlock Text="校园网认证守护" FontSize="24" FontWeight="SemiBold"/>
+                    <TextBlock Text="Campus Auth Guardian" FontSize="13" Opacity="0.6"/>
+                </StackPanel>
+            </StackPanel>
+
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    CornerRadius="12" Padding="20,16"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel Spacing="10">
+                    <Grid>
+                        <TextBlock Text="版本" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock x:Name="VersionText" Text="v2.2.0" HorizontalAlignment="Right" Opacity="0.8" FontSize="14"/>
+                    </Grid>
+                    <Grid>
+                        <TextBlock Text="架构" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock x:Name="ArchText" Text="—" HorizontalAlignment="Right" Opacity="0.8" FontSize="14"/>
+                    </Grid>
+                    <Grid>
+                        <TextBlock Text="认证内核" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="Rust (guardian-core)" HorizontalAlignment="Right" Opacity="0.8" FontSize="14"/>
+                    </Grid>
+                    <Grid>
+                        <TextBlock Text="界面框架" FontWeight="SemiBold" FontSize="14"/>
+                        <TextBlock Text="WinUI 3 · .NET 10 SelfContained" HorizontalAlignment="Right" Opacity="0.8" FontSize="14"/>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- 检查更新 -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    CornerRadius="12" Padding="20,16"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel Spacing="10">
+                    <Grid>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE895;" FontSize="18"/>
+                            <TextBlock Text="检查更新" FontWeight="SemiBold" FontSize="14" VerticalAlignment="Center"/>
+                        </StackPanel>
+                        <Button x:Name="CheckUpdateBtn" Content="检查" Click="CheckUpdate_Click"
+                                HorizontalAlignment="Right" Padding="18,6"/>
+                    </Grid>
+                    <ProgressRing x:Name="UpdateRing" IsActive="False" Width="26" Height="26"
+                                  HorizontalAlignment="Left" Visibility="Collapsed"/>
+                    <InfoBar x:Name="UpdateInfoBar" IsOpen="False" CloseButtonClick="UpdateInfoBar_Close"/>
+                    <TextBlock Text="数据来源：GitHub Releases API（github.com/NekoMirra/campus-auth-guardian）"
+                               FontSize="11.5" Opacity="0.5"/>
+                </StackPanel>
+            </Border>
+
+            <!-- GitHub 链接 -->
+            <Border Background="{ThemeResource CardBackgroundFillColorDefaultBrush}"
+                    CornerRadius="12" Padding="20,16"
+                    BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}" BorderThickness="1">
+                <StackPanel Spacing="12">
+                    <TextBlock Text="项目" FontWeight="SemiBold" FontSize="14"/>
+                    <StackPanel Spacing="8">
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE943;" FontSize="16"/>
+                            <HyperlinkButton Content="GitHub 仓库 · NekoMirra/campus-auth-guardian"
+                                             NavigateUri="https://github.com/NekoMirra/campus-auth-guardian"
+                                             Padding="0"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE8A9;" FontSize="16"/>
+                            <HyperlinkButton Content="Releases · 下载最新版本"
+                                             NavigateUri="https://github.com/NekoMirra/campus-auth-guardian/releases"
+                                             Padding="0"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE8FD;" FontSize="16"/>
+                            <HyperlinkButton Content="Issues · 反馈问题"
+                                             NavigateUri="https://github.com/NekoMirra/campus-auth-guardian/issues"
+                                             Padding="0"/>
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" Spacing="10">
+                            <FontIcon Glyph="&#xE90F;" FontSize="16"/>
+                            <HyperlinkButton Content="作者 · NekoMirra"
+                                             NavigateUri="https://github.com/NekoMirra"
+                                             Padding="0"/>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+
+            <!-- 声明 -->
+            <TextBlock Text="本程序仅用于校园网认证的自动化管理，请遵守所在学校的网络使用规定。"
+                       FontSize="11.5" Opacity="0.45" TextWrapping="Wrap"/>
+            <TextBlock Text="MIT License · © 2026 NekoMirra" FontSize="11.5" Opacity="0.45"/>
+
+        </StackPanel>
+    </ScrollViewer>
+</Page>

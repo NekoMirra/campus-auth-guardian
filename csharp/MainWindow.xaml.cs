@@ -107,36 +107,34 @@ namespace CampusAuthGuardian
                         var detail = root.TryGetProperty("detail", out var d) ? d.GetString() : null;
 
                         // Internet 连通性卡
-                        (Windows.UI.Color netColor, string netText) = status switch
+                        (Windows.UI.Color netColor, string netText, string netSub) = status switch
                         {
-                            "connected" => (MSGB(0x6C, 0xB8, 0x3F), "已连通"),
-                            "captive" => (MSGB(0xFF, 0xA5, 0x00), "已连接到校园网（未认证）"),
-                            _ => (MSGB(0xE5, 0x4C, 0x52), "不可达"),
+                            "connected" => (MSGB(0x6C, 0xB8, 0x3F), "已连通", "可直接访问互联网"),
+                            "captive" => (MSGB(0xFF, 0xA5, 0x00), "已连校园网·未认证", "点击「立即认证」完成 Portal 登录"),
+                            "dns_pending" => (MSGB(0xFF, 0xA5, 0x00), "认证生效中", "DNS 尚未就绪，正在自动复检…"),
+                            _ => (MSGB(0xE5, 0x4C, 0x52), "不可达", "无法连接检测服务器"),
                         };
                         NetLight.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(netColor);
                         NetStatusText.Text = netText;
                         NetDetailText.Text = status switch
                         {
-                            "connected" => "可直接访问互联网",
+                            "connected" => netSub,
                             "captive" => "门户：" + Truncate(string.IsNullOrEmpty(detail) ? "检测到重定向" : detail!, 60),
+                            "dns_pending" => netSub,
                             _ => "无法连接检测服务器" + (string.IsNullOrEmpty(detail) ? "" : "：" + Truncate(detail!, 60)),
                         };
 
-                        // Portal 认证卡（captive=未认证；connected=认证有效）
-                        (Windows.UI.Color authColor, string authText) = status switch
+                        // Portal 认证卡
+                        (Windows.UI.Color authColor, string authText, string authSub) = status switch
                         {
-                            "connected" => (MSGB(0x6C, 0xB8, 0x3F), "已认证"),
-                            "captive" => (MSGB(0xE5, 0x4C, 0x52), "未认证"),
-                            _ => (MSGB(0x80, 0x80, 0x80), "无法判断"),
+                            "connected" => (MSGB(0x6C, 0xB8, 0x3F), "已认证", "ePortal 会话有效"),
+                            "captive" => (MSGB(0xE5, 0x4C, 0x52), "未认证", "点击「立即认证」完成登录"),
+                            "dns_pending" => (MSGB(0xFF, 0xA5, 0x00), "生效中", "认证已通过，网络正在生效"),
+                            _ => (MSGB(0x80, 0x80, 0x80), "无法判断", "请先检查网络连接"),
                         };
                         AuthLight.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(authColor);
                         AuthStatusText.Text = authText;
-                        AuthDetailText.Text = status switch
-                        {
-                            "connected" => "ePortal 会话有效",
-                            "captive" => "点击「立即认证」完成 Portal 登录",
-                            _ => "请先检查网络连接",
-                        };
+                        AuthDetailText.Text = authSub;
 
                         // 顶部摘要
                         StatusIcon.Glyph = status switch
@@ -151,7 +149,7 @@ namespace CampusAuthGuardian
                             "captive" => "需要认证",
                             _ => "网络不可达",
                         };
-                        StatusLight.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(netColor);
+                        StatusLight.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(netColor);
                         if (status == "connected") DetailText.Text = "认证有效，网络畅通";
                         else if (status == "captive") DetailText.Text = "检测到认证门户，需要 Portal 登录";
                         else DetailText.Text = "无法连接检测服务器";
@@ -166,7 +164,7 @@ namespace CampusAuthGuardian
                         {
                             StatusIcon.Glyph = "\uE8D7";
                             StatusText.Text = "认证成功";
-                            StatusLight.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(MSGB(0x6C, 0xB8, 0x3F));
+                            StatusLight.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(MSGB(0x6C, 0xB8, 0x3F));
                             DetailText.Text = detail == "already_online" ? "本机已在线（无需重复认证）" : "Portal 协议认证成功";
                             _tray.ShowBalloon("校园网认证", detail == "already_online" ? "已在线，无需重复认证" : "认证成功，网络已连接");
                         }
@@ -269,7 +267,10 @@ namespace CampusAuthGuardian
             catch (JsonException) { sb.Append(raw); }
             LogsText.Text = sb.ToString();
             LogsScroll.UpdateLayout();
-            LogsScroll.ChangeView(null, float.MaxValue, null, true);
+            if (AutoScrollCheck?.IsChecked == true)
+            {
+                LogsScroll.ChangeView(null, float.MaxValue, null, true);
+            }
         }
 
         private void LoadSettings()
@@ -321,13 +322,18 @@ namespace CampusAuthGuardian
             StatusPage.Visibility = tag == "status" ? Visibility.Visible : Visibility.Collapsed;
             SettingsPage.Visibility = tag == "settings" ? Visibility.Visible : Visibility.Collapsed;
             LogsPage.Visibility = tag == "logs" ? Visibility.Visible : Visibility.Collapsed;
+            AboutFrame.Visibility = tag == "about" ? Visibility.Visible : Visibility.Collapsed;
+            if (tag == "about" && AboutFrame.Content is null)
+            {
+                AboutFrame.Content = new AboutPage();
+            }
             if (tag == "logs") RefreshLogs();
         }
 
         private void AuthNow_Click(object sender, RoutedEventArgs e)
         {
             StatusText.Text = "正在认证…";
-            StatusLight.Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(MSGB(0x00, 0x7E, 0xD4));
+            StatusLight.Foreground = new Microsoft.UI.Xaml.Media.SolidColorBrush(MSGB(0x00, 0x7E, 0xD4));
             Task.Run(() => Native.AuthNow());
         }
 
@@ -470,6 +476,8 @@ namespace CampusAuthGuardian
         private void RefreshLogs_Click(object sender, RoutedEventArgs e) => RefreshLogs();
 
         private void InfoBar_Close(object sender, object e) => InfoBar.IsOpen = false;
+
+        private void StatusInfoBar_Close(object sender, object e) => StatusInfoBar.IsOpen = false;
 
         private void MainWindow_Closed(object sender, WindowEventArgs args)
         {

@@ -40,18 +40,21 @@ pub fn urlencode(s: &str) -> String {
     out
 }
 
-/// 构造认证 URL。
-pub fn build_login_url(cfg: &Config, ip: &str, callback: &str) -> String {
+/// 构造认证 URL。`ac` 为 (wlan_ac_ip, wlan_ac_name)，从 captive portal 重定向提取；未知传空。
+pub fn build_login_url(cfg: &Config, ip: &str, callback: &str, ac: Option<(&str, &str)>) -> String {
     let account = format!(",0,{}@{}", cfg.student_id, cfg.operator.as_str());
+    let (ac_ip, ac_name) = ac.unwrap_or(("", ""));
     format!(
         "{}?callback={cb}&login_method=1&user_account={acc}&user_password={pw}\
          &wlan_user_ip={ip}&wlan_user_ipv6=&wlan_user_mac=000000000000\
-         &wlan_ac_ip=&wlan_ac_name=&jsVersion=4.1.3&terminal_type=1&lang=zh-cn&v=3015&lang=zh",
+         &wlan_ac_ip={acip}&wlan_ac_name={acname}&jsVersion=4.1.3&terminal_type=1&lang=zh-cn&v=3015&lang=zh",
         cfg.auth_url,
         cb = urlencode(callback),
         acc = urlencode(&account),
         pw = urlencode(&cfg.password),
         ip = urlencode(ip),
+        acip = urlencode(ac_ip),
+        acname = urlencode(ac_name),
     )
 }
 
@@ -73,37 +76,92 @@ fn parse_jsonp(text: &str) -> Option<(i64, Option<i64>, String)> {
     Some((result, ret_code, msg))
 }
 
-/// 执行一次认证。`ip` 优先用 config.fixed_ip，否则自动检测；带固定 IP 失败自动回退。
+/// 执行一次认证：收集全部候选 IP（fixed_ip 优先 + 本机各网卡按评分排序），
+/// 逐一尝试，任一成功/已在线立即返回；全部失败返回最后一个失败结果。
+/// IP 会漂移（DHCP 换段、多网卡），不绑定单一 IP。
 pub fn authenticate(cfg: &Config) -> AuthOutcome {
-    let fixed = cfg.fixed_ip.clone();
-    let auto = ipdetect::detect_local_ip();
+    let mut candidates: Vec<String> = Vec::new();
 
-    if let Some(ip) = fixed.clone() {
-        let outcome = authenticate_with_ip(cfg, &ip);
-        match outcome {
-            AuthOutcome::NetworkError { msg } if auto.is_some() && auto.as_deref() != Some(ip.as_str()) => {
-                log_warn!("固定IP {ip} 网络错误: {msg}，回退自动检测IP");
-            }
-            AuthOutcome::Failed { msg } if auto.is_some() && auto.as_deref() != Some(ip.as_str()) => {
-                log_warn!("固定IP {ip} 认证失败({msg})，回退自动IP");
-                let auto_ip = auto.unwrap();
-                let retry = authenticate_with_ip(cfg, &auto_ip);
-                log_info!("自动IP {auto_ip} 结果: {:?}", retry);
-                return retry;
-            }
-            other => return other,
+    // 1) 固定 IP 最优先（用户显式指定）
+    if let Some(f) = cfg.fixed_ip.as_deref() {
+        if !f.trim().is_empty() {
+            candidates.push(f.trim().to_string());
         }
     }
+    // 2) 本机所有 IPv4（评分排序：10.x 优先）
+    for a in crate::ipdetect::list_adapters() {
+        if !candidates.contains(&a.ip) {
+            candidates.push(a.ip);
+        }
+    }
+    // 评分排序（除第一个 fixed 外）
+    if candidates.len() > 1 {
+        let mut rest = candidates.split_off(1);
+        rest.sort_by_key(|ip| std::cmp::Reverse(ip_score(ip)));
+        candidates.extend(rest);
+    }
+    // 去重相邻
+    candidates.dedup();
 
-    match auto {
-        Some(ip) => authenticate_with_ip(cfg, &ip),
-        None => AuthOutcome::NetworkError {
-            msg: "未检测到可用本机 IP".into(),
-        },
+    if candidates.is_empty() {
+        return AuthOutcome::NetworkError { msg: "未检测到可用本机 IP".into() };
+    }
+    log_info!("认证候选 IP: {:?}", candidates);
+
+    let mut last: Option<AuthOutcome> = None;
+    for (i, ip) in candidates.iter().enumerate() {
+        let outcome = authenticate_with_ip(cfg, ip, None);
+        let ok = outcome.is_ok();
+        log_info!("候选 {}/{} IP {ip} 结果: {}", i + 1, candidates.len(),
+            match &outcome {
+                AuthOutcome::Success => "成功".to_string(),
+                AuthOutcome::AlreadyOnline => "已在线".to_string(),
+                AuthOutcome::Failed { msg } => format!("失败({msg})"),
+                AuthOutcome::NetworkError { msg } => format!("网络错误({msg})"),
+            });
+        if ok {
+            return outcome; // 成功/已在线立即返回
+        }
+        last = Some(outcome);
+    }
+    last.unwrap_or_else(|| AuthOutcome::NetworkError { msg: "全部候选 IP 认证失败".into() })
+}
+
+/// 带门户 AC 参数的认证（captive portal 检测到后调用）。
+/// `ac` = (wlanacip, wlanacname, portal_user_ip)；portal_user_ip 非空时插到候选最前。
+pub fn authenticate_with_ac(cfg: &Config, ac: Option<(&str, &str, &str)>) -> AuthOutcome {
+    // portal 报告的 user_ip 是 AC 认定的会话 IP，必须最优先使用
+    if let Some((_, _, portal_ip)) = ac {
+        if !portal_ip.is_empty() {
+            let mut cfg2 = cfg.clone();
+            cfg2.fixed_ip = Some(portal_ip.to_string());
+            return authenticate(&cfg2);
+        }
+    }
+    authenticate(cfg)
+}
+
+/// IP 候选评分：10.x 校园网最高，其次 192.168 非网关，172.16-31 最低。
+pub fn ip_score(ip: &str) -> u8 {
+    let octets: Vec<u32> = ip.split('.').filter_map(|o| o.parse().ok()).collect();
+    if octets.len() != 4 {
+        return 0;
+    }
+    let (a, b, c) = (octets[0], octets[1], octets[2]);
+    if a == 10 {
+        5
+    } else if a == 192 && b == 168 && c != 1 {
+        4
+    } else if a == 192 && b == 168 {
+        3
+    } else if a == 172 && (16..=31).contains(&b) {
+        2
+    } else {
+        1
     }
 }
 
-fn authenticate_with_ip(cfg: &Config, ip: &str) -> AuthOutcome {
+fn authenticate_with_ip(cfg: &Config, ip: &str, ac: Option<(&str, &str)>) -> AuthOutcome {
     // 与旧版一致：先 GET 登录页（尝试取 PHPSESSID；未取到也继续）
     let agent = match ureq::AgentBuilder::new()
         .timeout_connect(std::time::Duration::from_secs(5))
@@ -114,7 +172,7 @@ fn authenticate_with_ip(cfg: &Config, ip: &str) -> AuthOutcome {
     };
     let _ = agent.get(&cfg.login_page_url()).call();
 
-    let url = build_login_url(cfg, ip, "dr1005");
+    let url = build_login_url(cfg, ip, "dr1005", ac);
     log_info!("Auth URL: {url}");
 
     match agent.get(&url).call() {
@@ -180,7 +238,7 @@ mod tests {
 
     #[test]
     fn login_url_shape() {
-        let url = build_login_url(&cfg(), "10.59.29.29", "dr1005");
+        let url = build_login_url(&cfg(), "10.59.29.29", "dr1005", None);
         assert!(url.starts_with("http://10.10.102.50:801/eportal/portal/login?callback=dr1005&"));
         assert!(url.contains("user_account=%2C0%2C24028116%40unicom"));
         assert!(url.contains("user_password=Tust0910"));
