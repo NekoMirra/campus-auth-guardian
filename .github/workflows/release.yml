@@ -67,8 +67,8 @@ jobs:
             Invoke-WebRequest -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/Unofficial/ChineseSimplified.isl" -OutFile $isl
           }
           $ver = "${{ github.ref_name }}" -replace "^v", ""
-          & $iscc /DMyAppVersion=$ver "installer/campus-auth-guardian.iss"
-          if ($LASTEXITCODE -ne 0) { Write-Host "::error::ISCC failed"; exit 1 }
+          & $iscc /DMyAppVersion=$ver "installer/campus-auth-guardian.iss" 2>&1 | ForEach-Object { Write-Host "ISCC: $_" }
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::ISCC failed with $LASTEXITCODE"; exit 1 }
           Get-Item installer/*.exe | Select-Object Name, Length
 
       - name: Smoke test (x64 only, launch and verify alive)
