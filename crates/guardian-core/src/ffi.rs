@@ -212,6 +212,7 @@ pub unsafe extern "C" fn guardian_poll_event(
                     "status": match ns {
                         NetStatus::Connected => "connected",
                         NetStatus::CaptivePortal { .. } => "captive",
+                        NetStatus::DnsPending => "dns_pending",
                         NetStatus::Disconnected { .. } => "disconnected",
                     },
                     "detail": match ns {
@@ -281,6 +282,9 @@ pub unsafe extern "C" fn guardian_probe_server(auth_url: *const c_char, len: usi
                 reachable = true;
                 latency_ms = Some(started.elapsed().as_millis() as u64);
                 http_status = Some(302);
+            }
+            crate::netcheck::NetStatus::DnsPending => {
+                issues.push(serde_json::json!("DNS 暂不可用（可能需要先认证）"));
             }
             crate::netcheck::NetStatus::Disconnected { reason } => {
                 issues.push(serde_json::json!(format!("服务器不可达: {reason}")));

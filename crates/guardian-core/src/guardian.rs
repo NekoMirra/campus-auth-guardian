@@ -171,7 +171,7 @@ fn run_loop(inner: Arc<Inner>, tx: crossbeam_channel::Sender<GuardianEvent>) {
 
     loop {
         if inner.manual_kick.swap(false, Ordering::SeqCst) {
-            do_auth(&inner, &tx);
+            do_auth(&inner, &tx, None);
             consecutive_failures = 0;
             next_check = std::time::Instant::now() + inner.cfg.lock().unwrap_or_else(|e| e.into_inner()).check_interval;
         }
@@ -193,6 +193,24 @@ fn run_loop(inner: Arc<Inner>, tx: crossbeam_channel::Sender<GuardianEvent>) {
         if now >= next_check {
             let cfg = inner.cfg.lock().unwrap_or_else(|e| e.into_inner()).clone();
             let status = netcheck::check(&cfg.check_url, Duration::from_secs(8));
+
+            match &status {
+                NetStatus::Connected => {
+                    // 确认机制：认证刚成功后 DNS/路由可能抖动，连续 2 次通过才清零
+                    consecutive_failures = consecutive_failures.saturating_sub(1);
+                    next_check = now + cfg.check_interval;
+                }
+                NetStatus::DnsPending => {
+                    // DNS 暂未就绪：短延迟快速复检（5s），不计失败
+                    tx.send(GuardianEvent::NetStatus(NetStatus::DnsPending)).ok();
+                    log_info!("DNS 暂未就绪，5s 后复检");
+                    next_check = std::time::Instant::now() + Duration::from_secs(5);
+                    std::thread::sleep(Duration::from_millis(500));
+                    continue;
+                }
+                _ => {}
+            }
+
             tx.send(GuardianEvent::NetStatus(status.clone())).ok();
             match status {
                 NetStatus::Connected => {
@@ -201,11 +219,15 @@ fn run_loop(inner: Arc<Inner>, tx: crossbeam_channel::Sender<GuardianEvent>) {
                 }
                 NetStatus::CaptivePortal { redirect } => {
                     log_warn!("检测到 captive portal: {redirect}");
-                    consecutive_failures = run_retry_burst(&inner, &tx);
+                    // 提取 AC 参数（wlanacip/wlanacname），认证请求回填
+                    let (ac_ip, ac_name, portal_user_ip) = crate::netcheck::extract_ac_params(&redirect);
+                    log_info!("AC 参数: ip={ac_ip} name={ac_name} user_ip={portal_user_ip}");
+                    consecutive_failures = run_retry_burst(&inner, &tx, Some((ac_ip.as_str(), ac_name.as_str(), portal_user_ip.as_str())));
                     // 失败爆发后指数退避：2^n * retry_interval，封顶 10 分钟
                     let backoff = backoff_delay(&cfg, consecutive_failures);
                     next_check = std::time::Instant::now() + backoff;
                 }
+                NetStatus::DnsPending => unreachable!(),
                 NetStatus::Disconnected { reason } => {
                     log_warn!("网络不可达: {reason}");
                     consecutive_failures += 1;
@@ -230,13 +252,17 @@ fn backoff_delay(cfg: &Config, failures: u32) -> Duration {
 
 /// 一轮认证爆发：最多 cfg.max_retries 次，每次间隔 retry_interval。
 /// 返回仍剩余的连续失败数（0 = 成功）。
-fn run_retry_burst(inner: &Arc<Inner>, tx: &crossbeam_channel::Sender<GuardianEvent>) -> u32 {
+fn run_retry_burst(
+    inner: &Arc<Inner>,
+    tx: &crossbeam_channel::Sender<GuardianEvent>,
+    ac: Option<(&str, &str, &str)>,
+) -> u32 {
     let cfg = inner.cfg.lock().unwrap_or_else(|e| e.into_inner()).clone();
     for attempt in 1..=cfg.max_retries {
         if !inner.running.load(Ordering::SeqCst) {
             return 0;
         }
-        let outcome = do_auth(inner, tx);
+        let outcome = do_auth(inner, tx, ac);
         if outcome.is_ok() {
             return 0;
         }
@@ -249,10 +275,14 @@ fn run_retry_burst(inner: &Arc<Inner>, tx: &crossbeam_channel::Sender<GuardianEv
     cfg.max_retries
 }
 
-fn do_auth(inner: &Arc<Inner>, tx: &crossbeam_channel::Sender<GuardianEvent>) -> AuthOutcome {
+fn do_auth(
+    inner: &Arc<Inner>,
+    tx: &crossbeam_channel::Sender<GuardianEvent>,
+    ac: Option<(&str, &str, &str)>,
+) -> AuthOutcome {
     let cfg = inner.cfg.lock().unwrap_or_else(|e| e.into_inner()).clone();
     inner_state(inner, GuardianState::Authenticating, tx);
-    let outcome = auth::authenticate(&cfg);
+    let outcome = auth::authenticate_with_ac(&cfg, ac);
     tx.send(GuardianEvent::AuthResult(outcome.clone())).ok();
     inner_state(inner, GuardianState::Monitoring, tx);
     match &outcome {

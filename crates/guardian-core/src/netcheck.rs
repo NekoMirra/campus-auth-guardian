@@ -4,14 +4,35 @@ use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::time::Duration;
 
+use crate::log_warn;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum NetStatus {
     /// 直连成功（可能仍是 200 假阳性，但 UI 意义上已连通）
     Connected,
-    /// 被劫持到认证门户
+    /// 被劫持到认证门户（redirect = 完整重定向 URL）
     CaptivePortal { redirect: String },
+    /// DNS 暂不可用（认证刚成功后常见，DHCP/DNS 未生效）；非硬失败
+    DnsPending,
     /// 无法联网
     Disconnected { reason: String },
+}
+
+/// 从 captive portal 重定向 URL 提取 AC 参数（wlanacip / wlanacname / wlanuserip）。
+pub fn extract_ac_params(redirect: &str) -> (String, String, String) {
+    let mut get = |key: &str| -> String {
+        redirect
+            .split('?')
+            .nth(1)
+            .unwrap_or("")
+            .split('&')
+            .find_map(|kv| {
+                let (k, v) = kv.split_once('=')?;
+                (k.eq_ignore_ascii_case(key)).then(|| v.to_string())
+            })
+            .unwrap_or_default()
+    };
+    (get("wlanacip"), get("wlanacname"), get("wlanuserip"))
 }
 
 /// 从 HTTP 响应头字节中提取 Location（若 3xx）。
@@ -47,7 +68,10 @@ pub fn check(url: &str, timeout: Duration) -> NetStatus {
     use std::net::ToSocketAddrs;
     let sockaddrs: Vec<_> = match addr.to_socket_addrs() {
         Ok(it) => it.collect(),
-        Err(e) => return NetStatus::Disconnected { reason: format!("DNS 解析 {addr} 失败: {e}") },
+        Err(e) => {
+            log_warn!("DNS 解析 {addr} 失败: {e}（可能认证刚生效，DNS 暂未就绪）");
+            return NetStatus::DnsPending;
+        }
     };
     let mut last_err: Option<std::io::Error> = None;
     let mut stream = None;
