@@ -275,4 +275,39 @@ mod tests {
         // result 为字符串时按失败处理（服务端不会这样发；防御性）
         assert!(matches!(o, AuthOutcome::Failed { .. }));
     }
+
+    #[test]
+    fn urlencode_edge_empty_and_special() {
+        assert_eq!(urlencode(""), "");
+        assert_eq!(urlencode("=&%#+"), "%3D%26%25%23%2B");
+        assert_eq!(urlencode("中文"), "%E4%B8%AD%E6%96%87");
+        assert_eq!(urlencode("a b"), "a%20b");
+        assert_eq!(urlencode("-_.~"), "-_.~"); // 非保留字符
+    }
+
+    #[test]
+    fn parse_jsonp_msg_with_brackets() {
+        // msg 内含括号：rfind(')') 应正确取到最外层
+        let o = interpret(r#"dr1005({"result":0,"msg":"失败(原因:AC(x))","ret_code":1});"#);
+        assert_eq!(o, AuthOutcome::Failed { msg: "失败(原因:AC(x))".into() });
+    }
+
+    #[test]
+    fn interpret_unknown_result_code() {
+        let o = interpret(r#"dr1005({"result":3,"msg":"奇怪"});"#);
+        assert!(matches!(o, AuthOutcome::Failed { .. }));
+    }
+
+    #[test]
+    fn parse_jsonp_no_parens() {
+        assert!(matches!(interpret("dr1005"), AuthOutcome::Failed { .. }));
+    }
+
+    #[test]
+    fn ip_score_priority() {
+        assert!(ip_score("10.48.0.224") > ip_score("192.168.1.155"));
+        assert!(ip_score("192.168.1.155") > ip_score("172.29.144.1"));
+        assert!(ip_score("172.29.144.1") > ip_score("100.123.202.1"));
+        assert_eq!(ip_score("not-an-ip"), 0);
+    }
 }

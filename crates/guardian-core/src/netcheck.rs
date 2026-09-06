@@ -35,16 +35,20 @@ pub fn extract_ac_params(redirect: &str) -> (String, String, String) {
     (get("wlanacip"), get("wlanacname"), get("wlanuserip"))
 }
 
-/// 从 HTTP 响应头字节中提取 Location（若 3xx）。
+/// 从 HTTP 响应头字节中提取 Location（仅 301/302/303/307/308）。
+/// Location 头名大小写不敏感（部分门户返回小写头）。
 fn extract_location(head: &str) -> Option<String> {
     let status_first_line = head.lines().next()?;
-    if !status_first_line.contains(" 30") {
+    let code: u16 = status_first_line.split_whitespace().nth(1)?.parse().ok()?;
+    if !matches!(code, 301 | 302 | 303 | 307 | 308) {
         return None;
     }
     head.lines()
         .find_map(|l| {
-            let v = l.strip_prefix("Location:")?;
-            Some(v.trim().trim_end_matches('\r').to_string())
+            let (name, v) = l.split_once(':')?;
+            name.trim()
+                .eq_ignore_ascii_case("location")
+                .then(|| v.trim().trim_end_matches('\r').to_string())
         })
 }
 
@@ -155,7 +159,13 @@ pub fn parse_http_url(url: &str) -> Option<(String, u16, String)> {
         None => (rest, "/"),
     };
     let (host, port) = match hostport.rsplit_once(':') {
-        Some((h, p)) => (h, p.parse().ok()?),
+        Some((h, p)) => {
+            let port: u16 = p.parse().ok()?;
+            if port == 0 {
+                return None; // 端口 0 无效
+            }
+            (h, port)
+        }
         None => (hostport, 80),
     };
     if host.is_empty() {
@@ -190,5 +200,61 @@ mod tests {
         );
         let ok_head = "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\n\r\nbody";
         assert_eq!(extract_location(ok_head), None);
+    }
+
+    #[test]
+    fn extract_ac_params_full() {
+        let (ip, name, user) = extract_ac_params(
+            "http://10.10.102.50/a79.htm?wlanuserip=10.48.0.89&wlanacname=&wlanacip=10.10.102.49",
+        );
+        assert_eq!(ip, "10.10.102.49");
+        assert_eq!(name, "");
+        assert_eq!(user, "10.48.0.89");
+    }
+
+    #[test]
+    fn extract_ac_params_missing_and_case() {
+        let (ip, name, user) = extract_ac_params("http://x/a.htm?WLANACIP=1.2.3.4&WlanAcName=AC1");
+        assert_eq!(ip, "1.2.3.4");
+        assert_eq!(name, "AC1");
+        assert_eq!(user, "");
+    }
+
+    #[test]
+    fn extract_ac_params_no_query() {
+        let (ip, name, user) = extract_ac_params("http://x/a.htm");
+        assert_eq!((ip.as_str(), name.as_str(), user.as_str()), ("", "", ""));
+    }
+
+    #[test]
+    fn url_parse_edge_ports() {
+        assert_eq!(
+            parse_http_url("http://h:65535/"),
+            Some(("h".into(), 65535, "/".into()))
+        );
+        assert_eq!(parse_http_url("http://h:0/"), None); // 端口 0 无效
+        assert_eq!(parse_http_url("http://h:abc/"), None); // 非数字端口
+        assert_eq!(
+            parse_http_url("http://h/a?b=c&d=e"),
+            Some(("h".into(), 80, "/a?b=c&d=e".into()))
+        );
+    }
+
+    #[test]
+    fn location_extraction_case_insensitive_and_10() {
+        // 小写 location 头
+        let head = "HTTP/1.1 302 Found\r\nlocation: http://x/\r\n\r\n";
+        assert_eq!(extract_location(head), Some("http://x/".into()));
+        // 302 但无 Location
+        let head2 = "HTTP/1.1 302 Found\r\n\r\n";
+        assert_eq!(extract_location(head2), None);
+    }
+
+    #[test]
+    fn dns_pending_is_not_disconnected() {
+        // 类型层面确认 DnsPending 独立存在
+        let s = NetStatus::DnsPending;
+        assert!(matches!(s, NetStatus::DnsPending));
+        assert_ne!(s, NetStatus::Disconnected { reason: "x".into() });
     }
 }
