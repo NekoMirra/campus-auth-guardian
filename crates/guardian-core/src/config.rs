@@ -383,4 +383,55 @@ mod tests {
         let cfg = Config::parse("[account]\nstudent_id = a\nstudent_id = b\n");
         assert_eq!(cfg.student_id, "b");
     }
+
+    #[test]
+    fn edge_empty_and_comments() {
+        let cfg = Config::parse("\n;; 分号注释\n# 井号注释\n   \n[account]\n");
+        assert_eq!(cfg, Config::default());
+    }
+
+    #[test]
+    fn edge_crlf_line_endings() {
+        let cfg = Config::parse("[account]\r\nstudent_id = abc\r\nuser_password = pw\r\n");
+        assert_eq!(cfg.student_id, "abc");
+        assert_eq!(cfg.password, "pw");
+    }
+
+    #[test]
+    fn edge_no_space_around_equals() {
+        let cfg = Config::parse("[account]\nstudent_id=nospace\nuser_password=pw1\n");
+        assert_eq!(cfg.student_id, "nospace");
+        assert_eq!(cfg.password, "pw1");
+    }
+
+    #[test]
+    fn edge_value_with_equals() {
+        let cfg = Config::parse("[account]\nstudent_id = a=b=c\n");
+        assert_eq!(cfg.student_id, "a=b=c");
+    }
+
+    #[test]
+    fn edge_interval_bounds() {
+        // 下边界
+        let lo = Config::parse("[network]\ncheck_interval = 1\n[guardian]\nretry_interval = 1\nmax_retries = 1\n");
+        assert_eq!(lo.check_interval, Duration::from_secs(1));
+        assert_eq!(lo.retry_interval, Duration::from_secs(1));
+        assert_eq!(lo.max_retries, 1);
+        // 上边界
+        let hi = Config::parse("[network]\ncheck_interval = 3600\n[guardian]\nretry_interval = 3600\nmax_retries = 100\n");
+        assert_eq!(hi.check_interval, Duration::from_secs(3600));
+        assert_eq!(hi.retry_interval, Duration::from_secs(3600));
+        assert_eq!(hi.max_retries, 100);
+        // 非法：负数/非数字/0
+        let bad = Config::parse("[network]\ncheck_interval = -5\n[guardian]\nmax_retries = abc\nretry_interval = 0\n");
+        assert_eq!(bad.check_interval, Duration::from_secs(30));
+        assert_eq!(bad.max_retries, 3);
+        assert_eq!(bad.retry_interval, Duration::from_secs(10));
+    }
+
+    #[test]
+    fn edge_unicode_values() {
+        let cfg = Config::parse("[account]\nstudent_id = 学号123🎯\n");
+        assert_eq!(cfg.student_id, "学号123🎯");
+    }
 }
