@@ -185,8 +185,8 @@
                         <InfoBar x:Name="InfoBar" IsOpen="False" Severity="Success" CloseButtonClick="InfoBar_Close"/>
 
                         <TextBlock Text="服务器" Opacity="0.6" FontWeight="SemiBold" Margin="0,4,0,0"/>
-                        <TextBox x:Name="AuthUrlBox" Header="认证 API 地址"
-                                 PlaceholderText="http://10.10.102.50:801/eportal/portal/login"/>
+                        <TextBox x:Name="AuthUrlBox" Header="认证 API 地址（可只填服务器）"
+                                 PlaceholderText="http://10.10.102.50/"/>
                         <TextBox x:Name="CheckUrlBox" Header="连通性检测地址"
                                  PlaceholderText="http://www.baidu.com"/>
 

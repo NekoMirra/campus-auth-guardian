@@ -24,9 +24,9 @@
             <!-- 第1步：服务器 -->
             <StackPanel x:Name="Step1" Spacing="12" MaxWidth="560" HorizontalAlignment="Left">
                 <TextBlock Text="认证服务器" FontSize="18" FontWeight="SemiBold"/>
-                <TextBlock Text="输入学校的认证服务器地址（通常以 /eportal/portal/login 结尾）。不确定可先使用默认值。" TextWrapping="Wrap" Opacity="0.75"/>
+                <TextBlock Text="只需填写服务器地址（如 http://10.10.102.50/），端口与路径自动补全；完整地址也可直接粘贴。" TextWrapping="Wrap" Opacity="0.75"/>
                 <TextBox x:Name="WizAuthUrl" Header="认证服务器地址"
-                         PlaceholderText="http://10.10.102.50:801/eportal/portal/login"
+                         PlaceholderText="http://10.10.102.50/"
                          Text="http://10.10.102.50:801/eportal/portal/login"/>
                 <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
                     <Button x:Name="WizTestBtn" Content="检测服务器" Click="WizTest_Click" Padding="20,8"/>

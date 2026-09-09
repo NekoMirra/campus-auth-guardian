@@ -14,6 +14,37 @@ namespace CampusAuthGuardian
         private static readonly ConcurrentDictionary<string, byte> _handles = new();
         private const string SingleInstanceKey = "CampusAuthGuardian-Main";
 
+        /// 可写数据目录（配置/日志）。便携运行 = exe 同目录；安装到只读目录 = %APPDATA%。
+        internal static string DataDir { get; private set; } = AppContext.BaseDirectory;
+        internal static string ConfigPath { get; private set; } = Path.Combine(AppContext.BaseDirectory, "config.ini");
+
+        /// 安装到 Program Files 等只读目录时回退 %APPDATA%，并迁移 exe 旁已有配置。
+        private static void ResolveDataDir()
+        {
+            string exeDir = AppContext.BaseDirectory;
+            string exeCfg = Path.Combine(exeDir, "config.ini");
+            if (DirWritable(exeDir)) { DataDir = exeDir; ConfigPath = exeCfg; return; }
+            string appDir = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "CampusAuthGuardian");
+            try { Directory.CreateDirectory(appDir); } catch { }
+            string appCfg = Path.Combine(appDir, "config.ini");
+            try { if (File.Exists(exeCfg) && !File.Exists(appCfg)) File.Copy(exeCfg, appCfg); } catch { }
+            DataDir = appDir; ConfigPath = appCfg;
+        }
+
+        private static bool DirWritable(string dir)
+        {
+            try
+            {
+                string probe = Path.Combine(dir, ".writetest");
+                using (File.Create(probe)) { }
+                File.Delete(probe);
+                return true;
+            }
+            catch { return false; }
+        }
+
         public App()
         {
             InitializeComponent();
@@ -22,6 +53,7 @@ namespace CampusAuthGuardian
         protected override void OnLaunched(LaunchActivatedEventArgs args)
         {
             _dq = DispatcherQueue.GetForCurrentThread();
+            ResolveDataDir();
 
             // 单实例（key-based）：拿不到 key = 已有实例在跑，重定向激活后退出
             _mainInstance = AppInstance.FindOrRegisterForKey(SingleInstanceKey);
@@ -44,17 +76,15 @@ namespace CampusAuthGuardian
             {
                 try
                 {
-                    File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "crash.log"),
+                    File.AppendAllText(Path.Combine(DataDir, "crash.log"),
                         $"{DateTime.Now:yyyy-MM-dd HH:mm:ss} {e.Message}\n{e.Exception?.StackTrace}\n\n");
                 }
                 catch { }
                 e.Handled = true; // 阻止闪退；崩溃详情见 crash.log
             };
 
-            // Rust 内核初始化（配置/日志在 exe 同目录）
-            string exeDir = AppContext.BaseDirectory;
-            string cfgPath = Path.Combine(exeDir, "config.ini");
-            int rc = Native.GuardianInit(cfgPath);
+            // Rust 内核初始化（配置/日志与 ConfigPath 同目录）
+            int rc = Native.GuardianInit(ConfigPath);
             if (rc != 0)
             {
                 NativeWin32.MessageBoxW(IntPtr.Zero,

@@ -98,6 +98,31 @@ impl Default for Config {
 }
 
 impl Config {
+    /// 归一化认证地址：允许只填服务器（`http://10.10.102.50/` 或裸 `10.10.102.50`），
+    /// 自动补全登录端点；已含 `/eportal` 的完整地址原样保留；未指定端口默认 `:801`。
+    pub fn normalize_auth_url(raw: &str) -> String {
+        let s = raw.trim();
+        if s.is_empty() || s.contains("/eportal") {
+            return s.into();
+        }
+        let mut s = s.to_string();
+        if !s.contains("://") {
+            s = format!("http://{s}");
+        }
+        let no_query = s.split(['#', '?']).next().unwrap_or(&s);
+        let base = no_query.trim_end_matches('/');
+        let after_scheme = base.split("://").nth(1).unwrap_or(base);
+        let authority = after_scheme.split('/').next().unwrap_or(after_scheme);
+        // IPv6 中括号段含冒号，需排除后再判端口
+        let host_part = authority.rsplit(']').next().unwrap_or(authority);
+        let with_port = if host_part.contains(':') {
+            base.to_string()
+        } else {
+            format!("{base}:801")
+        };
+        format!("{with_port}/eportal/portal/login")
+    }
+
     /// 认证服务器基础地址（scheme+host+port），如 `http://10.10.102.50:801`。
     pub fn portal_base(&self) -> &str {
         self.auth_url
@@ -187,7 +212,7 @@ impl Config {
 
         if let Some(v) = get(&ini.network, "auth_url") {
             if !v.is_empty() {
-                cfg.auth_url = v.to_string();
+                cfg.auth_url = Config::normalize_auth_url(v);
             }
         }
         if let Some(v) = get(&ini.network, "check_url") {
@@ -366,6 +391,31 @@ mod tests {
     fn portal_base_strips_path() {
         let cfg = Config::parse("[network]\nauth_url = http://10.10.102.50:801/eportal/portal/login\n");
         assert_eq!(cfg.portal_base(), "http://10.10.102.50:801");
+    }
+
+    #[test]
+    fn normalize_auth_url_cases() {
+        // 用户需求：只填服务器，去掉端口也能用
+        assert_eq!(
+            Config::normalize_auth_url("http://10.10.102.50/"),
+            "http://10.10.102.50:801/eportal/portal/login"
+        );
+        assert_eq!(
+            Config::normalize_auth_url("10.10.102.50"),
+            "http://10.10.102.50:801/eportal/portal/login"
+        );
+        // 自带端口 → 保留端口
+        assert_eq!(
+            Config::normalize_auth_url("http://10.10.102.50:8080/"),
+            "http://10.10.102.50:8080/eportal/portal/login"
+        );
+        // 完整地址原样保留
+        assert_eq!(
+            Config::normalize_auth_url("http://10.10.102.50:801/eportal/portal/login"),
+            "http://10.10.102.50:801/eportal/portal/login"
+        );
+        // 空串原样（由调用方校验报错）
+        assert_eq!(Config::normalize_auth_url(""), "");
     }
 
     #[test]

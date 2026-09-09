@@ -121,7 +121,9 @@ pub unsafe extern "C" fn guardian_config_apply(json: *const c_char, len: usize) 
 /// 把 JSON 合并进配置：缺字段保持原值（向导只发 4 个字段，不可清空其他项）。
 fn apply_json_value(cfg: &mut Config, v: &serde_json::Value) {
     if let Some(s) = v.get("auth_url").and_then(|x| x.as_str()) {
-        cfg.auth_url = s.into();
+        if !s.trim().is_empty() {
+            cfg.auth_url = Config::normalize_auth_url(s);
+        }
     }
     if let Some(s) = v.get("check_url").and_then(|x| x.as_str()) {
         cfg.check_url = s.into();

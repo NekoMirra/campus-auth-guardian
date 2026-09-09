@@ -93,7 +93,7 @@ namespace CampusAuthGuardian
             int guard = 0;
             while (guard++ < 64 && Native.TryPollEvent(out string? raw) && raw != null)
             {
-                try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui_debug.log"),
+                try { File.AppendAllText(Path.Combine(App.DataDir, "ui_debug.log"),
                     $"{DateTime.Now:HH:mm:ss.fff} poll: {raw}\n"); } catch { }
                 try
                 {
@@ -203,7 +203,7 @@ namespace CampusAuthGuardian
             }
             catch (Exception ex)
             {
-                try { File.AppendAllText(Path.Combine(AppContext.BaseDirectory, "ui_debug.log"),
+                try { File.AppendAllText(Path.Combine(App.DataDir, "ui_debug.log"),
                     $"{DateTime.Now:HH:mm:ss.fff} POLL-CRASH: {ex.Message} :: {ex.StackTrace?.Split('\n')[0]}\n"); } catch { }
             }
         }
@@ -414,17 +414,16 @@ namespace CampusAuthGuardian
 
         private void OpenConfig_Click(object sender, RoutedEventArgs e)
         {
-            string cfg = Path.Combine(AppContext.BaseDirectory, "config.ini");
+            string cfg = App.ConfigPath;
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("notepad.exe", $"\"{cfg}\"")); } catch { }
         }
 
         private void ReloadConfig_Click(object sender, RoutedEventArgs e)
         {
             // 重读磁盘 ini：从文件解析后回填内核（热重载）
-            string exeDir = AppContext.BaseDirectory;
             try
             {
-                string text = File.ReadAllText(Path.Combine(exeDir, "config.ini"));
+                string text = File.ReadAllText(App.ConfigPath);
                 string json = IniToJson(text);
                 Native.ConfigApply(json);
                 LoadSettings();
