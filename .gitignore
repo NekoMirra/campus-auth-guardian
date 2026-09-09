@@ -94,3 +94,9 @@ scripts/env-*.bat
 publish-x64/
 publish-arm64/
 installer/*.exe
+# Local audit downloads (release asset verification)
+_audit/
+
+# Committed-by-accident junk dirs (never track)
+dist/
+build/

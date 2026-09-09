@@ -39,7 +39,7 @@
             <!-- 第2步：账号 -->
             <StackPanel x:Name="Step2" Spacing="12" MaxWidth="560" HorizontalAlignment="Left" Visibility="Collapsed">
                 <TextBlock Text="账号信息" FontSize="18" FontWeight="SemiBold"/>
-                <TextBox x:Name="WizStudentId" Header="学号" PlaceholderText="12345678"/>
+                <TextBox x:Name="WizStudentId" Header="学号" PlaceholderText="请输入学号"/>
                 <PasswordBox x:Name="WizPassword" Header="密码"/>
                 <TextBlock Text="运营商" FontWeight="SemiBold" Margin="0,6,0,0"/>
                 <ComboBox x:Name="WizOperator" SelectedIndex="0" MinWidth="240">

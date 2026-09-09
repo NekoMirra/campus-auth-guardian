@@ -305,7 +305,7 @@ mod tests {
 
     #[test]
     fn ip_score_priority() {
-        assert!(ip_score("10.20.30.41") > ip_score("192.168.1.100"));
+        assert!(ip_score("10.20.30.41") > ip_score("192.168.100.100"));
         assert!(ip_score("192.168.1.100") > ip_score("172.29.144.1"));
         assert!(ip_score("172.29.144.1") > ip_score("100.123.202.1"));
         assert_eq!(ip_score("not-an-ip"), 0);

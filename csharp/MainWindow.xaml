@@ -200,7 +200,7 @@
                             <PasswordBox x:Name="PasswordBox" Grid.Column="1" Header="密码"/>
                         </Grid>
                         <TextBox x:Name="FixedIpBox" Header="固定 IP（可选；NAT 环境填校园网侧 IP）"
-                                 PlaceholderText="10.20.30.40"/>
+                                 PlaceholderText="留空则自动检测"/>
 
                         <TextBlock Text="守护策略" Opacity="0.6" FontWeight="SemiBold" Margin="0,8,0,0"/>
                         <Grid ColumnSpacing="12">

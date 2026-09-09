@@ -165,8 +165,8 @@ mod tests {
         // 无法注入 mock adapter；直接测评分逻辑的等价行为
         let ips = vec![
             "172.29.144.1".to_string(),   // Hyper-V
-            "192.168.1.100".to_string(),  // 物理网卡
-            "10.20.30.41".to_string(),    // 校园网
+            "192.168.100.100".to_string(), // 物理网卡
+            "10.20.30.41".to_string(),     // 校园网
             "100.123.202.1".to_string(),  // Tailscale
         ];
         let best = ips

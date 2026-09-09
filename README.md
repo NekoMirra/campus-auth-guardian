@@ -72,7 +72,7 @@ operator_type = campus
 # 密码
 user_password = YOUR_PASSWORD
 # 固定 IP（可选；NAT 环境下填校园网侧 IP）
-fixed_ip = 10.20.30.40
+fixed_ip =
 
 [guardian]
 enabled = 0
