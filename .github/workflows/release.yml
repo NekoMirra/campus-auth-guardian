@@ -111,9 +111,10 @@ jobs:
           # 冒烟测试会在输出目录生成 config.ini/*.log（运行时产物）：发布包必须剔除
           Get-ChildItem "release/CampusAuthGuardian-x64", "release/CampusAuthGuardian-ARM64" -Recurse -Include *.log, config.ini | Remove-Item -Force
           Compress-Archive -Path "release/CampusAuthGuardian-x64/*" -DestinationPath "CampusAuthGuardian-windows-x64.zip" -Force
-          # setup.exe 独立资产（merge 后在 x64 目录）
-          if (Test-Path "release/CampusAuthGuardian-x64/CampusAuthGuardian-setup-x64-*.exe") {
-            Copy-Item "release/CampusAuthGuardian-x64/CampusAuthGuardian-setup-x64-*.exe" .
+          Compress-Archive -Path "release/CampusAuthGuardian-ARM64/*" -DestinationPath "CampusAuthGuardian-windows-ARM64.zip" -Force
+          # setup.exe 在 artifact 内保留 installer/ 目录结构（upload-artifact 特性）
+          if (Test-Path "release/CampusAuthGuardian-x64/installer/CampusAuthGuardian-setup-x64-*.exe") {
+            Copy-Item "release/CampusAuthGuardian-x64/installer/CampusAuthGuardian-setup-x64-*.exe" .
           }
           Get-Item *.zip, *.exe -ErrorAction SilentlyContinue | Select-Object Name, Length
 

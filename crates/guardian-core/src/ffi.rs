@@ -111,6 +111,15 @@ pub unsafe extern "C" fn guardian_config_apply(json: *const c_char, len: usize) 
         Err(_) => return -1,
     };
     let mut cfg = guardian().config();
+    apply_json_value(&mut cfg, &v);
+    match guardian().update_config(cfg) {
+        Ok(()) => 0,
+        Err(_) => -2,
+    }
+}
+
+/// 把 JSON 合并进配置：缺字段保持原值（向导只发 4 个字段，不可清空其他项）。
+fn apply_json_value(cfg: &mut Config, v: &serde_json::Value) {
     if let Some(s) = v.get("auth_url").and_then(|x| x.as_str()) {
         cfg.auth_url = s.into();
     }
@@ -131,9 +140,13 @@ pub unsafe extern "C" fn guardian_config_apply(json: *const c_char, len: usize) 
     if let Some(s) = v.get("password").and_then(|x| x.as_str()) {
         cfg.password = s.into();
     }
-    match v.get("fixed_ip").and_then(|x| x.as_str()) {
-        Some(s) if !s.trim().is_empty() => cfg.fixed_ip = Some(s.trim().into()),
-        _ => cfg.fixed_ip = None,
+    // 键缺席 → 保持；键存在但空 → 清除（设置页“留空自动检测”）。
+    if let Some(s) = v.get("fixed_ip").and_then(|x| x.as_str()) {
+        cfg.fixed_ip = if s.trim().is_empty() {
+            None
+        } else {
+            Some(s.trim().into())
+        };
     }
     if let Some(b) = v.get("guardian_enabled").and_then(|x| x.as_bool()) {
         cfg.guardian_enabled = b;
@@ -143,10 +156,6 @@ pub unsafe extern "C" fn guardian_config_apply(json: *const c_char, len: usize) 
     }
     if let Some(n) = v.get("max_retries").and_then(|x| x.as_u64()) {
         cfg.max_retries = (n.clamp(1, 100)) as u32;
-    }
-    match guardian().update_config(cfg) {
-        Ok(()) => 0,
-        Err(_) => -2,
     }
 }
 
@@ -494,5 +503,44 @@ fn autostart_query() -> Option<bool> {
 pub unsafe extern "C" fn guardian_shutdown_for_tests() {
     if let Some(g) = GUARDIAN.get() {
         g.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn val(json: &str) -> serde_json::Value {
+        serde_json::from_str(json).unwrap()
+    }
+
+    #[test]
+    fn missing_fixed_ip_key_preserves_value() {
+        // 向导只发 4 个字段：缺 fixed_ip 键不可清空已设固定 IP
+        let mut cfg = Config::default();
+        cfg.fixed_ip = Some("10.20.30.40".into());
+        apply_json_value(&mut cfg, &val(r#"{"student_id":"12345678"}"#));
+        assert_eq!(cfg.fixed_ip.as_deref(), Some("10.20.30.40"));
+        assert_eq!(cfg.student_id, "12345678");
+    }
+
+    #[test]
+    fn empty_fixed_ip_clears_value() {
+        // 设置页“留空自动检测”：显式空串才清除
+        let mut cfg = Config::default();
+        cfg.fixed_ip = Some("10.20.30.40".into());
+        apply_json_value(&mut cfg, &val(r#"{"fixed_ip":""}"#));
+        assert_eq!(cfg.fixed_ip, None);
+    }
+
+    #[test]
+    fn missing_keys_preserve_everything() {
+        let mut cfg = Config::default();
+        cfg.guardian_enabled = true;
+        cfg.max_retries = 9;
+        apply_json_value(&mut cfg, &val(r#"{"operator":"unicom"}"#));
+        assert!(cfg.guardian_enabled);
+        assert_eq!(cfg.max_retries, 9);
+        assert_eq!(cfg.operator, Operator::Unicom);
     }
 }
