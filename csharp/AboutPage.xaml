@@ -24,7 +24,7 @@
                 <StackPanel Spacing="10">
                     <Grid>
                         <TextBlock Text="版本" FontWeight="SemiBold" FontSize="14"/>
-                        <TextBlock x:Name="VersionText" Text="v2.2.0" HorizontalAlignment="Right" Opacity="0.8" FontSize="14"/>
+                        <TextBlock x:Name="VersionText" Text="v…" HorizontalAlignment="Right" Opacity="0.8" FontSize="14"/>
                     </Grid>
                     <Grid>
                         <TextBlock Text="架构" FontWeight="SemiBold" FontSize="14"/>

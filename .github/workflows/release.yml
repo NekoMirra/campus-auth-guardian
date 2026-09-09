@@ -46,7 +46,7 @@ jobs:
         uses: microsoft/setup-msbuild@v2
 
       - name: Build WinUI3 app (${{ matrix.platform }})
-        run: msbuild csharp\CampusAuthGuardian.csproj /p:Configuration=Release /p:Platform=${{ matrix.msbuild-platform }} /restore /m /v:m /bl
+        run: msbuild csharp\CampusAuthGuardian.csproj /p:Configuration=Release /p:Platform=${{ matrix.msbuild-platform }} /p:InformationalVersion=${{ github.ref_type == 'tag' && github.ref_name || '0.0.0-dev' }} /restore /m /v:m /bl
 
       - name: Build installer (x64 only)
         if: matrix.platform == 'x64'
@@ -108,9 +108,9 @@ jobs:
       - name: Zip per-platform
         shell: pwsh
         run: |
-          # merge-multiple:false → release/CampusAuthGuardian-x64/ 与 release/CampusAuthGuardian-ARM64/
+          # 冒烟测试会在输出目录生成 config.ini/*.log（运行时产物）：发布包必须剔除
+          Get-ChildItem "release/CampusAuthGuardian-x64", "release/CampusAuthGuardian-ARM64" -Recurse -Include *.log, config.ini | Remove-Item -Force
           Compress-Archive -Path "release/CampusAuthGuardian-x64/*" -DestinationPath "CampusAuthGuardian-windows-x64.zip" -Force
-          Compress-Archive -Path "release/CampusAuthGuardian-ARM64/*" -DestinationPath "CampusAuthGuardian-windows-ARM64.zip" -Force
           # setup.exe 独立资产（merge 后在 x64 目录）
           if (Test-Path "release/CampusAuthGuardian-x64/CampusAuthGuardian-setup-x64-*.exe") {
             Copy-Item "release/CampusAuthGuardian-x64/CampusAuthGuardian-setup-x64-*.exe" .

@@ -7,12 +7,12 @@ namespace CampusAuthGuardian
     public sealed partial class AboutPage : Page
     {
         private const string RepoApi = "https://api.github.com/repos/NekoMirra/campus-auth-guardian/releases/latest";
-        private const string CurrentVersion = "2.2.0";
+        // 当前版本：运行时读取（CI 注入），禁止写死常量（曾导致已是最新仍提示更新）。
 
         public AboutPage()
         {
             InitializeComponent();
-            VersionText.Text = $"v{CurrentVersion}";
+            VersionText.Text = $"v{AppVersion.Current}";
             ArchText.Text = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString();
         }
 
@@ -65,8 +65,13 @@ namespace CampusAuthGuardian
                 return;
             }
 
-            var latest = (latestTag ?? "").TrimStart('v');
-            var current = CurrentVersion.TrimStart('v');
+            if (string.IsNullOrWhiteSpace(latestTag))
+            {
+                ShowUpdate(InfoBarSeverity.Error, "未能获取到最新版本信息，请稍后重试", null);
+                return;
+            }
+            var latest = latestTag.TrimStart('v', 'V');
+            var current = AppVersion.Current.TrimStart('v', 'V');
             var isNewer = CompareVersions(latest, current) > 0;
 
             if (isNewer)
