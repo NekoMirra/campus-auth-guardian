@@ -37,17 +37,20 @@ namespace CampusAuthGuardian
                 latestTag = doc.RootElement.TryGetProperty("tag_name", out var tag) ? tag.GetString() : null;
                 if (doc.RootElement.TryGetProperty("assets", out var assets))
                 {
+                    string? exeUrl = null, zipUrl = null;
                     foreach (var a in assets.EnumerateArray())
                     {
                         var arch = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture;
                         string want = arch == System.Runtime.InteropServices.Architecture.Arm64 ? "ARM64" : "x64";
                         var name = a.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "";
-                        if (name.Contains(want) && name.EndsWith(".zip"))
-                        {
-                            downloadUrl = a.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
-                            break;
-                        }
+                        if (!name.Contains(want)) continue;
+                        var url = a.TryGetProperty("browser_download_url", out var u) ? u.GetString() : null;
+                        // 安装包优先（setup-x64/setup-ARM64），便携 zip 兜底
+                        if (name.Contains("setup-") && name.EndsWith(".exe")) exeUrl ??= url;
+                        else if (name.EndsWith(".zip")) zipUrl ??= url;
+                        if (exeUrl != null && zipUrl != null) break;
                     }
+                    downloadUrl = exeUrl ?? zipUrl;
                 }
             }
             catch (Exception ex)
