@@ -16,6 +16,7 @@ AppVerName={#MyAppName} v{#MyAppVersion} (ARM64)
 DefaultDirName={autopf}\{#MyAppNameEn}
 DefaultGroupName={#MyAppName}
 DisableProgramGroupPage=yes
+OutputDir=.
 OutputBaseFilename=CampusAuthGuardian-setup-ARM64-{#MyAppVersion}
 Compression=lzma2/max
 SolidCompression=yes

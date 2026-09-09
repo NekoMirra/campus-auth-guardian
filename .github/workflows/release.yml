@@ -71,6 +71,28 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Host "::error::ISCC failed with $LASTEXITCODE"; exit 1 }
           Get-Item installer/*.exe | Select-Object Name, Length
 
+      - name: Build installer (ARM64 only)
+        if: matrix.platform == 'ARM64'
+        shell: pwsh
+        run: |
+          # 收集 SelfContained 产物
+          New-Item -ItemType Directory -Path "publish-arm64" -Force | Out-Null
+          Copy-Item "csharp/bin/ARM64/Release/net10.0-windows10.0.26100.0/win-arm64/*" "publish-arm64/" -Recurse -Force
+          # Inno Setup（runner 预装于 choco 路径；若无则装）
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup -y --no-progress | Out-Null
+            $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          }
+          # 中文语言包（Inno 官方 Unofficial 翻译）
+          $isl = "C:\Program Files (x86)\Inno Setup 6\Languages\ChineseSimplified.isl"
+          if (-not (Test-Path $isl)) {
+            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/jrsoftware/issrc/main/Files/Languages/ChineseSimplified.isl" -OutFile $isl
+          }
+          $ver = "${{ github.ref_name }}" -replace "^v", ""
+          cmd /c "`"$iscc`" /DMyAppVersion=$ver installer\campus-auth-guardian-arm64.iss 2>&1"
+          if ($LASTEXITCODE -ne 0) { Write-Host "::error::ISCC failed with $LASTEXITCODE"; exit 1 }
+          Get-Item installer/*.exe | Select-Object Name, Length
       - name: Smoke test (x64 only, launch and verify alive)
         if: matrix.platform == 'x64'
         run: |
@@ -116,6 +138,9 @@ jobs:
           if (Test-Path "release/CampusAuthGuardian-x64/installer/CampusAuthGuardian-setup-x64-*.exe") {
             Copy-Item "release/CampusAuthGuardian-x64/installer/CampusAuthGuardian-setup-x64-*.exe" .
           }
+          if (Test-Path "release/CampusAuthGuardian-ARM64/installer/CampusAuthGuardian-setup-ARM64-*.exe") {
+            Copy-Item "release/CampusAuthGuardian-ARM64/installer/CampusAuthGuardian-setup-ARM64-*.exe" .
+          }
           Get-Item *.zip, *.exe -ErrorAction SilentlyContinue | Select-Object Name, Length
 
       - name: Publish GitHub release
@@ -125,5 +150,6 @@ jobs:
             CampusAuthGuardian-windows-x64.zip
             CampusAuthGuardian-windows-ARM64.zip
             CampusAuthGuardian-setup-x64-*.exe
+            CampusAuthGuardian-setup-ARM64-*.exe
           fail_on_unmatched_files: false
           generate_release_notes: true
